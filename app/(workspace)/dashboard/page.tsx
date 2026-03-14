@@ -18,10 +18,14 @@ import {
 import {
   acquisitionsQueue,
   aiPlaybooks,
+  buildLeadCommandQueue,
   commandCenterAlerts,
+  estimateDealSpread,
   formatCurrency,
   investorKpis,
   marketRadar,
+  mockLeads,
+  simulateCampaignOutcome,
 } from "@/lib/mock-investor-crm";
 
 const toneStyles = {
@@ -65,9 +69,9 @@ function InvestorCommandCenter() {
     };
   }, []);
 
-  const projectedProfit = useMemo(() => {
-    return acquisitionsQueue.reduce((sum, deal) => sum + (deal.arv - deal.purchasePrice - deal.rehab), 0);
-  }, []);
+  const projectedProfit = useMemo(() => acquisitionsQueue.reduce((sum, deal) => sum + estimateDealSpread(deal), 0), []);
+  const leadCommandQueue = useMemo(() => buildLeadCommandQueue(mockLeads), []);
+  const simulatedCampaign = useMemo(() => simulateCampaignOutcome(mockLeads), []);
 
   return (
     <div className="space-y-5">
@@ -75,11 +79,11 @@ function InvestorCommandCenter() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-xs uppercase tracking-[0.16em] text-zinc-400">Investor OS • Command Center</p>
-            <h1 className="mt-1 text-2xl font-semibold text-white">AI-Powered Real Estate Acquisition Engine</h1>
-            <p className="mt-1 text-sm text-zinc-400">Fully mocked data demo: predictive lead scoring, dispo automation, and market-aware pipeline orchestration.</p>
+            <h1 className="mt-1 text-2xl font-semibold text-white">Hyper-Advanced AI Real Estate CRM</h1>
+            <p className="mt-1 text-sm text-zinc-400">Mocked live operations: acquisitions, lead triage, next-best-actions, and campaign simulations.</p>
           </div>
           <span className="inline-flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-200">
-            <Sparkles className="h-3.5 w-3.5" /> Ahead-of-the-curve mode active
+            <Sparkles className="h-3.5 w-3.5" /> 100x investor mode active
           </span>
         </div>
       </section>
@@ -112,23 +116,20 @@ function InvestorCommandCenter() {
                 </tr>
               </thead>
               <tbody>
-                {acquisitionsQueue.map((deal) => {
-                  const spread = deal.arv - deal.purchasePrice - deal.rehab;
-                  return (
-                    <tr key={deal.id} className="border-t border-zinc-800 bg-zinc-900/80 text-zinc-200">
-                      <td className="px-3 py-2">
-                        <button onClick={() => router.push(`/leads/${deal.id}`)} className="text-left transition hover:text-sky-300">
-                          <div className="font-medium">{deal.asset}</div>
-                          <div className="text-xs text-zinc-400">{deal.market} • {deal.stage}</div>
-                        </button>
-                      </td>
-                      <td className="px-3 py-2">{deal.strategy}</td>
-                      <td className="px-3 py-2 text-amber-300">{deal.sellerMotivation}</td>
-                      <td className="px-3 py-2 text-emerald-300">{deal.aiWinProbability}%</td>
-                      <td className="px-3 py-2 text-sky-300">{formatCurrency(spread)}</td>
-                    </tr>
-                  );
-                })}
+                {acquisitionsQueue.map((deal) => (
+                  <tr key={deal.id} className="border-t border-zinc-800 bg-zinc-900/80 text-zinc-200">
+                    <td className="px-3 py-2">
+                      <button onClick={() => router.push(`/leads/${deal.id}`)} className="text-left transition hover:text-sky-300">
+                        <div className="font-medium">{deal.asset}</div>
+                        <div className="text-xs text-zinc-400">{deal.market} • {deal.stage}</div>
+                      </button>
+                    </td>
+                    <td className="px-3 py-2">{deal.strategy}</td>
+                    <td className="px-3 py-2 text-amber-300">{deal.sellerMotivation}</td>
+                    <td className="px-3 py-2 text-emerald-300">{deal.aiWinProbability}%</td>
+                    <td className="px-3 py-2 text-sky-300">{formatCurrency(estimateDealSpread(deal))}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -141,6 +142,47 @@ function InvestorCommandCenter() {
             {commandCenterAlerts.map((alert) => (
               <div key={alert} className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-200">{alert}</div>
             ))}
+          </div>
+        </article>
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[1.2fr_1fr]">
+        <article className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-zinc-300">Mock Lead Command Queue</h3>
+            <span className="text-xs text-zinc-400">Actionable lead intelligence</span>
+          </div>
+          <div className="space-y-2">
+            {leadCommandQueue.slice(0, 5).map((item, index) => (
+              <div key={item.lead.id} className="rounded-xl border border-zinc-800 bg-zinc-950 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-zinc-100">#{index + 1} {item.lead.ownerName} • {item.lead.propertyAddress}</p>
+                  <span className="text-xs text-sky-300">Conv: {item.conversion}% • Heat: {item.heat}</span>
+                </div>
+                <p className="mt-1 text-xs text-zinc-400">Signals: {item.lead.motivationSignals.join(", ")} • Timeline: {item.lead.timelineDays}d • Preferred: {item.lead.channelPreference}</p>
+                <div className="mt-2 rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-2.5 py-1.5 text-xs text-emerald-200">
+                  <span className="font-semibold">{item.nextAction.urgency}</span> — {item.nextAction.action}
+                </div>
+              </div>
+            ))}
+          </div>
+        </article>
+
+        <article className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
+          <h3 className="mb-3 text-sm font-semibold uppercase tracking-[0.15em] text-zinc-300">Campaign Simulator (Mock)</h3>
+          <div className="space-y-3">
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3">
+              <p className="text-xs uppercase tracking-[0.13em] text-zinc-400">Expected Appointments</p>
+              <p className="mt-1 text-3xl font-semibold text-white">{simulatedCampaign.expectedAppointments}</p>
+            </div>
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3">
+              <p className="text-xs uppercase tracking-[0.13em] text-zinc-400">Expected Contracts</p>
+              <p className="mt-1 text-3xl font-semibold text-emerald-300">{simulatedCampaign.expectedContracts}</p>
+            </div>
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3">
+              <p className="text-xs uppercase tracking-[0.13em] text-zinc-400">Projected Revenue</p>
+              <p className="mt-1 text-3xl font-semibold text-sky-300">{formatCurrency(simulatedCampaign.projectedRevenue)}</p>
+            </div>
           </div>
         </article>
       </section>
@@ -225,7 +267,7 @@ function TeamLeadDashboard() {
         <div className="flex items-center justify-between">
           <div>
             <p className="text-xs uppercase tracking-[0.16em] text-zinc-400">Team Performance AI</p>
-            <h2 className="mt-2 text-2xl font-semibold text-white">Quota Trajectory: 132% projected attainment</h2>
+            <h2 className="mt-2 text-2xl font-semibold text-white">Quota Trajectory: 147% projected attainment</h2>
           </div>
           <Users className="h-6 w-6 text-sky-300" />
         </div>
@@ -238,8 +280,8 @@ function TeamLeadDashboard() {
 function SuperAdminDashboard() {
   const healthCards = [
     { title: "Automation Runtime", value: "99.992%", detail: "Last 30 days", icon: Activity },
-    { title: "AI Lead Scoring Calls", value: "2.7M", detail: "24h throughput", icon: Bot },
-    { title: "Infra Cost Efficiency", value: "-22%", detail: "vs previous month", icon: Gauge },
+    { title: "AI Lead Scoring Calls", value: "4.1M", detail: "24h throughput", icon: Bot },
+    { title: "Infra Cost Efficiency", value: "-27%", detail: "vs previous month", icon: Gauge },
     { title: "Data Integrity", value: "100%", detail: "nightly sync checks", icon: CheckCircle2 },
   ];
 
