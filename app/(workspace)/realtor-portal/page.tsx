@@ -1,5 +1,5 @@
 import { RealtorPortalManager } from "@/components/realtor-portal/realtor-portal-manager";
-import { getAuthenticatedUserId } from "@/lib/auth";
+import { AUTH_BYPASS_ENABLED, getAuthenticatedUserId } from "@/lib/auth";
 import { ensureRealtorPortalTestLead, listClaimableLeads, listLeads } from "@/lib/store";
 
 export default async function RealtorPortalPage() {
@@ -8,7 +8,7 @@ export default async function RealtorPortalPage() {
 
   try {
     const testLead = await ensureRealtorPortalTestLead();
-    const baseLeads = userId ? await listLeads(userId) : await listClaimableLeads(200);
+    const baseLeads = AUTH_BYPASS_ENABLED ? await listClaimableLeads(200) : userId ? await listLeads(userId) : await listClaimableLeads(200);
     leads = [testLead, ...baseLeads.filter((lead) => lead.id !== testLead.id)];
   } catch {
     leads = [];

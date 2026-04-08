@@ -598,16 +598,89 @@ export async function listClaimableLeads(limit = 100) {
 }
 
 const REALTOR_PORTAL_TEST_LEAD = {
-  businessName: "123 Palm Avenue Test Lead",
-  city: "Miami",
+  businessName: "Cedar Vista Seller Opportunity",
+  city: "Phoenix",
   businessType: "Off Market Property",
-  phone: "(305) 555-0147",
-  email: "realtor.test@example.com",
-  websiteUrl: "https://sunset-villas-test.example",
-  sourceQuery: "demo_seed",
+  phone: "(602) 555-0188",
+  email: "alicia.romero@desertpeakrealty.com",
+  websiteUrl: "https://real-estate-crm-two-pi.vercel.app",
+  sourceQuery: "realtor_portal_demo",
 };
 
+function buildRealtorPortalDemoScheduledAt() {
+  const scheduled = new Date();
+  scheduled.setDate(scheduled.getDate() + 2);
+  scheduled.setHours(14, 30, 0, 0);
+  return scheduled.toISOString();
+}
+
+function buildRealtorPortalDemoSourcePayload() {
+  const scheduledAt = buildRealtorPortalDemoScheduledAt();
+
+  return {
+    sourceQuery: REALTOR_PORTAL_TEST_LEAD.sourceQuery,
+    aiResearchSummary:
+      "Demo seller lead seeded for realtor walkthrough confirmation, CMA delivery, and investor-side listing coordination.",
+    investorProfile: {
+      category: "DISTRESSED_SELLER" as const,
+      targetPropertyType: "single family",
+      propertyAddress: "2147 E Cedar Vista Dr, Phoenix, AZ 85032",
+      ownerName: "Monica Alvarez",
+      leadType: "Off Market Property",
+      leadScore: 86,
+      tags: ["Inherited Property", "Needs Light Rehab", "Vacant"],
+      motivationSignals: ["Inherited Property", "Vacant", "Out-of-State Owner"],
+      recommendedAction: "Use the walkthrough and CMA to validate repair spread, then move to a written cash offer within 24 hours.",
+      rationale: "Seeded demo scenario for the realtor coordination workflow.",
+      sourceKind: "MANUAL" as const,
+    },
+    contacts: [
+      {
+        id: "demo-realtor-contact",
+        name: "Alicia Romero",
+        role: "Listing Agent",
+        phones: [REALTOR_PORTAL_TEST_LEAD.phone],
+        emails: [REALTOR_PORTAL_TEST_LEAD.email],
+      },
+      {
+        id: "demo-seller-contact",
+        name: "Monica Alvarez",
+        role: "Property Owner",
+        phones: ["(480) 555-0126"],
+        emails: ["monica.alvarez@example.com"],
+      },
+    ],
+    realtorPortal: {
+      enabled: true,
+      token: "demo-realtor-portal-token",
+      realtorName: "Alicia Romero",
+      realtorEmail: REALTOR_PORTAL_TEST_LEAD.email,
+      realtorPhone: REALTOR_PORTAL_TEST_LEAD.phone,
+      brokerage: "Desert Peak Realty",
+      propertyAddress: "2147 E Cedar Vista Dr, Phoenix, AZ 85032",
+      portalNote:
+        "Please confirm the Thursday walkthrough window, review the attached CMA package, and send back any access notes, repair flags, or listing-price concerns before 6 PM.",
+      walkthrough: {
+        scheduledAt,
+        status: "PENDING" as const,
+        confirmedAt: null,
+        requestMessage: null,
+      },
+      cma: {
+        url: "/demo/realtor-portal-cma.html",
+        fileName: "Cedar-Vista-CMA.html",
+        note: "Broker price opinion and comp package prepared for investor review. Focus on as-is value, repair sensitivity, and list-vs-dispo range.",
+        sentAt: new Date().toISOString(),
+        viewedAt: null,
+      },
+      updatedAt: new Date().toISOString(),
+    },
+  };
+}
+
 export async function ensureRealtorPortalTestLead() {
+  const sourcePayload = buildRealtorPortalDemoSourcePayload();
+
   if (!hasDb) {
     return {
       id: "demo-realtor-portal-lead",
@@ -619,20 +692,13 @@ export async function ensureRealtorPortalTestLead() {
       websiteUrl: REALTOR_PORTAL_TEST_LEAD.websiteUrl,
       websiteStatus: null,
       socialLinks: [],
-      aiResearchSummary: "Seeded demo lead for walkthrough confirmation and CMA portal testing.",
+      aiResearchSummary: sourcePayload.aiResearchSummary,
       enrichment: null,
-      sourceQuery: REALTOR_PORTAL_TEST_LEAD.sourceQuery,
-      contacts: [
-        {
-          id: "demo-realtor-contact",
-          name: "Alicia Realtor",
-          role: "Listing Agent",
-          phones: [REALTOR_PORTAL_TEST_LEAD.phone],
-          emails: [REALTOR_PORTAL_TEST_LEAD.email],
-        },
-      ],
+      investorProfile: sourcePayload.investorProfile,
+      sourceQuery: sourcePayload.sourceQuery,
+      contacts: sourcePayload.contacts,
       demoBooking: null,
-      realtorPortal: null,
+      realtorPortal: sourcePayload.realtorPortal,
       status: "NEW" as const,
       deployedUrl: null,
       siteStatus: "UNBUILT" as const,
@@ -684,19 +750,7 @@ export async function ensureRealtorPortalTestLead() {
             status: "NEW",
             site_status: "UNBUILT",
             owner_id: null,
-            source_payload: {
-              sourceQuery: REALTOR_PORTAL_TEST_LEAD.sourceQuery,
-              aiResearchSummary: "Seeded demo lead for walkthrough confirmation and CMA portal testing.",
-              contacts: [
-                {
-                  id: "demo-realtor-contact",
-                  name: "Alicia Realtor",
-                  role: "Listing Agent",
-                  phones: [REALTOR_PORTAL_TEST_LEAD.phone],
-                  emails: [REALTOR_PORTAL_TEST_LEAD.email],
-                },
-              ],
-            },
+            source_payload: sourcePayload,
           }
         : {
             businessName: REALTOR_PORTAL_TEST_LEAD.businessName,
@@ -712,19 +766,7 @@ export async function ensureRealtorPortalTestLead() {
             status: "NEW",
             siteStatus: "UNBUILT",
             ownerId: null,
-            sourcePayload: {
-              sourceQuery: REALTOR_PORTAL_TEST_LEAD.sourceQuery,
-              aiResearchSummary: "Seeded demo lead for walkthrough confirmation and CMA portal testing.",
-              contacts: [
-                {
-                  id: "demo-realtor-contact",
-                  name: "Alicia Realtor",
-                  role: "Listing Agent",
-                  phones: [REALTOR_PORTAL_TEST_LEAD.phone],
-                  emails: [REALTOR_PORTAL_TEST_LEAD.email],
-                },
-              ],
-            },
+            sourcePayload: sourcePayload,
           },
     ),
   }));

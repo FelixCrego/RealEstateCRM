@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cedar Vista CMA Package</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #09090b;
+        --panel: rgba(24, 24, 27, 0.88);
+        --border: rgba(63, 63, 70, 0.7);
+        --text: #f4f4f5;
+        --muted: #a1a1aa;
+        --accent: #38bdf8;
+        --accent-2: #34d399;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        font-family: "Segoe UI", Arial, sans-serif;
+        background:
+          radial-gradient(circle at top left, rgba(56, 189, 248, 0.16), transparent 28%),
+          radial-gradient(circle at bottom right, rgba(52, 211, 153, 0.14), transparent 24%),
+          var(--bg);
+        color: var(--text);
+      }
+
+      main {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 40px 20px 56px;
+      }
+
+      .hero,
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 28px;
+      }
+
+      .hero {
+        padding: 28px;
+        margin-bottom: 20px;
+      }
+
+      .eyebrow {
+        font-size: 12px;
+        letter-spacing: 0.24em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+
+      h1 {
+        margin: 14px 0 10px;
+        font-size: 36px;
+        line-height: 1.1;
+      }
+
+      p {
+        color: var(--muted);
+        line-height: 1.6;
+      }
+
+      .grid {
+        display: grid;
+        gap: 20px;
+      }
+
+      .stats {
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        margin-top: 24px;
+      }
+
+      .stat,
+      .panel {
+        padding: 22px;
+      }
+
+      .stat-value {
+        font-size: 28px;
+        font-weight: 700;
+        color: var(--text);
+        margin-top: 8px;
+      }
+
+      .two-col {
+        grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+      }
+
+      h2 {
+        margin: 0 0 14px;
+        font-size: 20px;
+      }
+
+      ul {
+        margin: 0;
+        padding-left: 18px;
+        color: var(--muted);
+        line-height: 1.7;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        color: var(--muted);
+      }
+
+      th,
+      td {
+        text-align: left;
+        padding: 12px 0;
+        border-bottom: 1px solid rgba(63, 63, 70, 0.5);
+      }
+
+      th {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.18em;
+        color: var(--accent);
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        border: 1px solid rgba(52, 211, 153, 0.35);
+        background: rgba(52, 211, 153, 0.1);
+        color: #d1fae5;
+        padding: 6px 12px;
+        font-size: 12px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      @media (max-width: 860px) {
+        h1 { font-size: 28px; }
+        .two-col { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="hero">
+        <div class="eyebrow">Broker Price Opinion</div>
+        <h1>2147 E Cedar Vista Dr, Phoenix, AZ 85032</h1>
+        <p>
+          Demo comp package prepared for investor review. This package is designed to show how the realtor portal can deliver
+          a clean walkthrough brief, valuation range, and pricing guidance without sending the agent into email chaos.
+        </p>
+
+        <div class="grid stats">
+          <div class="stat panel">
+            <div class="eyebrow">As-Is Range</div>
+            <div class="stat-value">$282,000 - $296,000</div>
+          </div>
+          <div class="stat panel">
+            <div class="eyebrow">Repairs</div>
+            <div class="stat-value">$26,000</div>
+          </div>
+          <div class="stat panel">
+            <div class="eyebrow">Suggested List</div>
+            <div class="stat-value">$309,000</div>
+          </div>
+          <div class="stat panel">
+            <div class="eyebrow">Investor Dispo</div>
+            <div class="stat-value">$258,000 - $268,000</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="grid two-col">
+        <article class="panel">
+          <h2>Comp Snapshot</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Comp</th>
+                <th>Beds/Baths</th>
+                <th>Sq Ft</th>
+                <th>Status</th>
+                <th>Price</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>2124 E Juniper Ave</td>
+                <td>3 / 2</td>
+                <td>1,612</td>
+                <td>Sold</td>
+                <td>$314,000</td>
+              </tr>
+              <tr>
+                <td>2210 E Desert Cove</td>
+                <td>3 / 2</td>
+                <td>1,580</td>
+                <td>Pending</td>
+                <td>$319,900</td>
+              </tr>
+              <tr>
+                <td>2056 E Cinnabar Ave</td>
+                <td>4 / 2</td>
+                <td>1,690</td>
+                <td>Sold</td>
+                <td>$327,500</td>
+              </tr>
+            </tbody>
+          </table>
+        </article>
+
+        <aside class="grid">
+          <section class="panel">
+            <div class="badge">Recommended Angle</div>
+            <p>
+              Position this as a clean cosmetic-to-light rehab listing with upside for both investor resale and agent re-listing.
+              The property shows strongest value if access is reliable and the agent can validate HVAC age and roof condition onsite.
+            </p>
+          </section>
+
+          <section class="panel">
+            <h2>Walkthrough Priorities</h2>
+            <ul>
+              <li>Confirm occupancy and lockbox access before arrival.</li>
+              <li>Photograph kitchen, baths, roofline, and mechanicals.</li>
+              <li>Call out anything that shifts listability versus direct investor exit.</li>
+              <li>Flag title, probate, or disclosure issues immediately.</li>
+            </ul>
+          </section>
+        </aside>
+      </section>
+    </main>
+  </body>
+</html>
