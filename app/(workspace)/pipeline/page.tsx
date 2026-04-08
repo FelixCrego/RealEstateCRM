@@ -172,17 +172,17 @@ export default function PipelinePage() {
           .filter(Boolean)
           .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
           .join(" "),
-        contactName: "Upcoming Demo",
+        contactName: "Calendar Event",
         rep: "—",
         value: 0,
         stage,
         vercelStatus: "Unbuilt" as const,
         phone: "",
         email: "",
-        lastAction: "Status synced from Upcoming Demos",
-        leadSource: "Upcoming Demos",
+        lastAction: "Status synced from Acquisitions Calendar",
+        leadSource: "Acquisitions Calendar",
         websiteGoal: "",
-        history: ["Created from upcoming demo status selector."],
+        history: ["Created from acquisitions calendar stage selector."],
       }));
   }, [demoStageOverrides, leadIdByNormalizedName, liveDeals]);
 
@@ -199,7 +199,7 @@ export default function PipelinePage() {
     Scripts: [
       "30-second opener focused on ROI and speed-to-launch.",
       "Objection interrupt script for budget hesitation.",
-      "Follow-up voicemail script with CTA to book demo.",
+      "Follow-up voicemail script with CTA to lock the next acquisition step.",
     ],
     Objections: [
       '"We already have a site." → Position as a conversion upgrade, not a redesign.',
@@ -208,7 +208,7 @@ export default function PipelinePage() {
     ],
     Tips: [
       "Mention competitor velocity: reps win when they show launch dates, not mockups.",
-      "Always confirm primary conversion event before demo begins.",
+      "Always confirm the next concrete acquisition milestone before the appointment begins.",
       "Send live preview within 60 minutes after call to maintain momentum.",
     ],
   };
