@@ -44,6 +44,26 @@ type ParsedCsvLead = {
   investorProfile?: InvestorLeadProfile | null;
 };
 
+type ScrapeDiagnostics = {
+  queriesAttempted: number;
+  textSearchOkCount: number;
+  textSearchErrorCount: number;
+  detailsOkCount: number;
+  detailsErrorCount: number;
+  detailsLookupCount: number;
+  stoppedEarly: boolean;
+  timeBudgetExceeded: boolean;
+  leadCapReached: boolean;
+  skippedByRating: number;
+  skippedByDedupe: number;
+};
+
+type ScrapeStats = {
+  fetched: number;
+  inserted: number;
+  diagnostics: ScrapeDiagnostics;
+};
+
 type ScrapeMode = "DISTRESSED_SELLERS" | "CASH_BUYERS" | "REALTORS" | "WHOLESALERS" | "PROPERTY_MANAGERS" | "CONTRACTORS";
 
 const SCRAPE_MODE_OPTIONS: Array<{
@@ -193,15 +213,23 @@ function parseLeadsFromCsv(raw: string): ParsedCsvLead[] {
 }
 
 function websitePill(lead: Lead) {
-  const hasWebsite = Boolean(lead.websiteUrl);
-  const label = hasWebsite ? lead.websiteUrl : lead.websiteStatus || "MISSING";
+  const hasDirectWebsite = Boolean(lead.websiteUrl);
+  const label =
+    hasDirectWebsite
+      ? lead.websiteUrl
+      : lead.websiteStatus === "DIRECTORY_ONLY"
+        ? "Directory profile only"
+        : lead.websiteStatus || "MISSING";
+  const tone = hasDirectWebsite
+    ? "border border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+    : lead.websiteStatus === "DIRECTORY_ONLY"
+      ? "border border-amber-500/30 bg-amber-500/10 text-amber-300"
+      : "border border-red-500/30 bg-red-500/10 text-red-400";
 
   return (
     <span
       title={label || undefined}
-      className={`inline-flex max-w-[16rem] truncate rounded-full px-2.5 py-1 text-xs font-medium ${
-        hasWebsite ? "border border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border border-red-500/30 bg-red-500/10 text-red-400"
-      }`}
+      className={`inline-flex max-w-[16rem] truncate rounded-full px-2.5 py-1 text-xs font-medium ${tone}`}
     >
       {label}
     </span>
@@ -222,6 +250,22 @@ function investorCategoryPill(profile?: InvestorLeadProfile | null) {
   return <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${tone}`}>{label}</span>;
 }
 
+function clampRating(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(5, Number(value.toFixed(1))));
+}
+
+function buildDiagnosticsMessages(diagnostics: ScrapeDiagnostics) {
+  const messages: string[] = [];
+
+  if (diagnostics.timeBudgetExceeded) messages.push("Runtime budget reached before every generated query was exhausted.");
+  if (diagnostics.leadCapReached) messages.push("Lead cap reached for this run. Narrow the search or rerun with a tighter channel/city combination.");
+  if (diagnostics.textSearchErrorCount > 0) messages.push(`${diagnostics.textSearchErrorCount} Google text search request${diagnostics.textSearchErrorCount === 1 ? "" : "s"} failed and were skipped.`);
+  if (diagnostics.detailsErrorCount > 0) messages.push(`${diagnostics.detailsErrorCount} place detail lookup${diagnostics.detailsErrorCount === 1 ? "" : "s"} failed.`);
+
+  return messages;
+}
+
 export default function ScrapePage() {
   const leadsPerPage = 30;
   const [city, setCity] = useState("");
@@ -229,7 +273,6 @@ export default function ScrapePage() {
   const [niche, setNiche] = useState("probate attorney");
   const [targetPropertyType, setTargetPropertyType] = useState("single family");
   const [minRating, setMinRating] = useState(0);
-  const [includeNoWebsiteOnly, setIncludeNoWebsiteOnly] = useState(false);
   const [isScraping, setIsScraping] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isResearchingLeadId, setIsResearchingLeadId] = useState<string | null>(null);
@@ -238,7 +281,7 @@ export default function ScrapePage() {
   const [error, setError] = useState<string | null>(null);
   const [claimSuccessMessage, setClaimSuccessMessage] = useState<string | null>(null);
   const [leads, setLeads] = useState<Lead[]>([]);
-  const [stats, setStats] = useState<{ fetched: number; inserted: number } | null>(null);
+  const [stats, setStats] = useState<ScrapeStats | null>(null);
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isAddLeadOpen, setIsAddLeadOpen] = useState(false);
@@ -253,6 +296,8 @@ export default function ScrapePage() {
     () => SCRAPE_MODE_OPTIONS.find((option) => option.value === scrapeMode) ?? SCRAPE_MODE_OPTIONS[0],
     [scrapeMode],
   );
+  const canRunScrape = Boolean(city.trim() && niche.trim()) && !isScraping;
+  const scrapeDiagnosticsMessages = useMemo(() => (stats ? buildDiagnosticsMessages(stats.diagnostics) : []), [stats]);
 
   useEffect(() => {
     setNiche((previous) => {
@@ -305,6 +350,16 @@ export default function ScrapePage() {
   }, []);
 
   async function handleScrape() {
+    const normalizedCity = city.trim().replace(/\s+/g, " ");
+    const normalizedBusinessType = niche.trim().replace(/\s+/g, " ");
+    const normalizedTargetPropertyType = targetPropertyType.trim().replace(/\s+/g, " ");
+    const normalizedMinRating = clampRating(minRating);
+
+    if (!normalizedCity || !normalizedBusinessType) {
+      setError("City and search term are required before running a scrape.");
+      return;
+    }
+
     setIsScraping(true);
     setError(null);
     setStats(null);
@@ -313,12 +368,11 @@ export default function ScrapePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          city,
-          businessType: niche,
-          minRating,
-          includeNoWebsiteOnly,
+          city: normalizedCity,
+          businessType: normalizedBusinessType,
+          minRating: normalizedMinRating,
           investorCategory: scrapeMode,
-          targetPropertyType,
+          targetPropertyType: normalizedTargetPropertyType,
         }),
       });
 
@@ -330,7 +384,24 @@ export default function ScrapePage() {
         throw new Error(errorMessage);
       }
 
-      setStats({ fetched: Number(payload.fetched ?? 0), inserted: Number(payload.inserted ?? 0) });
+      const diagnostics = (payload.diagnostics ?? {}) as ApiPayload;
+      setStats({
+        fetched: Number(payload.fetched ?? 0),
+        inserted: Number(payload.inserted ?? 0),
+        diagnostics: {
+          queriesAttempted: Number(diagnostics.queriesAttempted ?? 0),
+          textSearchOkCount: Number(diagnostics.textSearchOkCount ?? 0),
+          textSearchErrorCount: Number(diagnostics.textSearchErrorCount ?? 0),
+          detailsOkCount: Number(diagnostics.detailsOkCount ?? 0),
+          detailsErrorCount: Number(diagnostics.detailsErrorCount ?? 0),
+          detailsLookupCount: Number(diagnostics.detailsLookupCount ?? 0),
+          stoppedEarly: Boolean(diagnostics.stoppedEarly ?? false),
+          timeBudgetExceeded: Boolean(diagnostics.timeBudgetExceeded ?? false),
+          leadCapReached: Boolean(diagnostics.leadCapReached ?? false),
+          skippedByRating: Number(diagnostics.skippedByRating ?? 0),
+          skippedByDedupe: Number(diagnostics.skippedByDedupe ?? 0),
+        },
+      });
       await refreshLeads();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Scrape failed.");
@@ -605,15 +676,15 @@ export default function ScrapePage() {
           </label>
           <label className="block rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2">
             <p className="text-[11px] text-zinc-400">Minimum Rating</p>
-            <input type="number" min={0} max={5} step={0.1} value={minRating} onChange={(e) => setMinRating(Number(e.target.value))} className="mt-1 w-full bg-transparent text-sm text-zinc-100 outline-none" />
+            <input type="number" min={0} max={5} step={0.1} value={minRating} onChange={(e) => setMinRating(clampRating(Number(e.target.value)))} className="mt-1 w-full bg-transparent text-sm text-zinc-100 outline-none" />
           </label>
-          <button onClick={handleScrape} disabled={isScraping} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-zinc-100 px-4 text-sm font-medium text-zinc-950 hover:bg-white disabled:opacity-70">
+          <button onClick={handleScrape} disabled={!canRunScrape} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-zinc-100 px-4 text-sm font-medium text-zinc-950 hover:bg-white disabled:opacity-70">
             {isScraping ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
             {isScraping ? "Scraping..." : "Run Scrape"}
           </button>
         </div>
 
-        <div className="mt-3 grid gap-3 md:grid-cols-3">
+        <div className="mt-3 grid gap-3 md:grid-cols-4">
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
             <p className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">Current Strategy</p>
             <p className="mt-2 text-sm font-semibold text-zinc-100">{activeMode.label}</p>
@@ -628,14 +699,46 @@ export default function ScrapePage() {
             <p className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">CSV Tip</p>
             <p className="mt-2 text-xs text-zinc-300">Import absentee owners, probate lists, tax delinquent records, or code violation lists with optional columns like `propertyAddress`, `ownerName`, `leadType`, `leadScore`, and `tags`.</p>
           </div>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+            <p className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">Website Signal</p>
+            <p className="mt-2 text-sm text-zinc-200">Direct websites are scored automatically.</p>
+            <p className="mt-1 text-xs text-zinc-400">Directory-only listings stay visible, but they no longer masquerade as a true business website.</p>
+          </div>
         </div>
 
-        <label className="mt-3 inline-flex items-center gap-2 text-sm text-zinc-300">
-          <input type="checkbox" checked={includeNoWebsiteOnly} onChange={(e) => setIncludeNoWebsiteOnly(e.target.checked)} className="size-4 rounded border-zinc-600 bg-zinc-900" />
-          Prioritize contacts with no direct website
-        </label>
-
-        {stats && <p className="mt-3 text-sm text-emerald-300">Fetched {stats.fetched} investor-relevant contacts, inserted {stats.inserted} new leads.</p>}
+        {stats && (
+          <>
+            <p className="mt-3 text-sm text-emerald-300">Fetched {stats.fetched} investor-relevant contacts, inserted {stats.inserted} new leads.</p>
+            <div className="mt-3 grid gap-3 md:grid-cols-4">
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+                <p className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">Queries Run</p>
+                <p className="mt-2 text-lg font-semibold text-zinc-100">{stats.diagnostics.queriesAttempted}</p>
+              </div>
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+                <p className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">Details Loaded</p>
+                <p className="mt-2 text-lg font-semibold text-zinc-100">{stats.diagnostics.detailsOkCount}</p>
+                <p className="mt-1 text-xs text-zinc-500">{stats.diagnostics.detailsErrorCount} failed</p>
+              </div>
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+                <p className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">Filtered Out</p>
+                <p className="mt-2 text-lg font-semibold text-zinc-100">{stats.diagnostics.skippedByRating + stats.diagnostics.skippedByDedupe}</p>
+                <p className="mt-1 text-xs text-zinc-500">{stats.diagnostics.skippedByRating} rating, {stats.diagnostics.skippedByDedupe} dedupe</p>
+              </div>
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+                <p className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">Run Status</p>
+                <p className="mt-2 text-sm font-semibold text-zinc-100">{stats.diagnostics.stoppedEarly ? "Partial run" : "Complete run"}</p>
+                <p className="mt-1 text-xs text-zinc-500">{stats.diagnostics.leadCapReached ? "Lead cap reached" : stats.diagnostics.timeBudgetExceeded ? "Time budget reached" : "No cap hit"}</p>
+              </div>
+            </div>
+            {scrapeDiagnosticsMessages.length ? (
+              <div className="mt-3 space-y-2">
+                {scrapeDiagnosticsMessages.map((message) => (
+                  <p key={message} className="text-xs text-amber-300">{message}</p>
+                ))}
+              </div>
+            ) : null}
+          </>
+        )}
         {error && <p className="mt-3 text-sm text-rose-300">{error}</p>}
         {claimSuccessMessage && <p className="mt-3 text-sm text-emerald-300">{claimSuccessMessage}</p>}
       </section>

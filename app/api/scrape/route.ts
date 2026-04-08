@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { scrapeLeads } from "@/lib/scraper";
+import { SCRAPE_MODES, scrapeLeads, type ScrapeMode } from "@/lib/scraper";
 import { insertLeads } from "@/lib/store";
 import { getAuthenticatedUserId } from "@/lib/auth";
 
@@ -21,23 +21,26 @@ export async function POST(request: Request) {
       }
     }
 
-    const city = String(body.city ?? "").trim();
-    const businessType = String(body.businessType ?? "").trim();
-    const investorCategory = String(body.investorCategory ?? "DISTRESSED_SELLERS").trim().toUpperCase();
-    const targetPropertyType = String(body.targetPropertyType ?? "").trim();
+    const city = String(body.city ?? "").trim().replace(/\s+/g, " ");
+    const businessType = String(body.businessType ?? "").trim().replace(/\s+/g, " ");
+    const investorCategoryRaw = String(body.investorCategory ?? "DISTRESSED_SELLERS").trim().toUpperCase();
+    const targetPropertyType = String(body.targetPropertyType ?? "").trim().replace(/\s+/g, " ").slice(0, 80);
 
-    if (!city || !businessType) {
-      return NextResponse.json({ error: "City and businessType are required." }, { status: 400 });
+    if (city.length < 2 || businessType.length < 2) {
+      return NextResponse.json({ error: "City and businessType must each be at least 2 characters." }, { status: 400 });
     }
 
-    const minRating = Number(body.minRating ?? 0);
-    const includeNoWebsiteOnly = Boolean(body.includeNoWebsiteOnly ?? false);
+    if (!SCRAPE_MODES.includes(investorCategoryRaw as ScrapeMode)) {
+      return NextResponse.json({ error: `investorCategory must be one of: ${SCRAPE_MODES.join(", ")}.` }, { status: 400 });
+    }
+
+    const minRatingRaw = Number(body.minRating ?? 0);
+    const minRating = Number.isFinite(minRatingRaw) ? Math.max(0, Math.min(5, minRatingRaw)) : 0;
     const { leads, diagnostics } = await scrapeLeads({
       city,
       businessType,
-      minRating: Number.isFinite(minRating) ? minRating : 0,
-      includeNoWebsiteOnly,
-      investorCategory: investorCategory as Parameters<typeof scrapeLeads>[0]["investorCategory"],
+      minRating,
+      investorCategory: investorCategoryRaw as ScrapeMode,
       targetPropertyType,
     });
     const inserted = await insertLeads(userId, leads);

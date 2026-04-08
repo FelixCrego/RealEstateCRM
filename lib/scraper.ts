@@ -27,13 +27,13 @@ const MAX_PLACE_DETAILS_LOOKUPS_PER_RUN = 80;
 const MAX_LEADS_PER_RUN = 40;
 const SCRAPE_RUNTIME_BUDGET_MS = 45000;
 
-type ScrapeMode = "DISTRESSED_SELLERS" | "CASH_BUYERS" | "REALTORS" | "WHOLESALERS" | "PROPERTY_MANAGERS" | "CONTRACTORS";
+export const SCRAPE_MODES = ["DISTRESSED_SELLERS", "CASH_BUYERS", "REALTORS", "WHOLESALERS", "PROPERTY_MANAGERS", "CONTRACTORS"] as const;
+export type ScrapeMode = (typeof SCRAPE_MODES)[number];
 
 type ScrapeOptions = {
   city: string;
   businessType: string;
   minRating?: number;
-  includeNoWebsiteOnly?: boolean;
   investorCategory?: ScrapeMode;
   targetPropertyType?: string;
 };
@@ -85,6 +85,29 @@ function sleep(ms: number) {
 function cleanPhoneNumber(phoneStr?: string | null) {
   if (!phoneStr) return "";
   return phoneStr.replace(/\D/g, "");
+}
+
+function hasDirectWebsite(websiteUrl?: string | null) {
+  if (!websiteUrl) return false;
+
+  const normalizedUrl = websiteUrl.toLowerCase();
+  const nonDirectDomains = [
+    "facebook.com",
+    "yelp.com",
+    "yellowpages.com",
+    "bbb.org",
+    "angi.com",
+    "houzz.com",
+    "instagram.com",
+    "manta.com",
+    "homeadvisor.com",
+    "porch.com",
+    "thumbtack.com",
+    "mapquest.com",
+    "nextdoor.com",
+  ];
+
+  return !nonDirectDomains.some((domain) => normalizedUrl.includes(domain));
 }
 
 function buildSearchQueries(city: string, businessType: string, investorCategory: ScrapeMode, targetPropertyType?: string) {
@@ -418,7 +441,6 @@ export async function scrapeLeads({
   city,
   businessType,
   minRating = 0,
-  includeNoWebsiteOnly = false,
   investorCategory = "DISTRESSED_SELLERS",
   targetPropertyType = "",
 }: ScrapeOptions): Promise<{ leads: Omit<Lead, "id" | "updatedAt" | "status">[]; diagnostics: ScrapeDiagnostics }> {
@@ -426,21 +448,7 @@ export async function scrapeLeads({
   if (!mapsApiKey) {
     throw new Error("MAPS_API_KEY is required to scrape leads with Google Places API.");
   }
-
   const geminiApiKey = process.env.GEMINI_API_KEY;
-  const fakeWebsiteDomains = [
-    "facebook.com",
-    "yelp.com",
-    "yellowpages.com",
-    "bbb.org",
-    "angi.com",
-    "houzz.com",
-    "instagram.com",
-    "manta.com",
-    "homeadvisor.com",
-    "porch.com",
-    "thumbtack.com",
-  ];
 
   const seenPlaceIds = new Set<string>();
   const seenNames = new Set<string>();
@@ -547,10 +555,8 @@ export async function scrapeLeads({
         diagnostics.detailsOkCount += 1;
 
         const details = detailsJson.result;
-        const website = (details.website ?? "").toLowerCase();
-        const hasRealWebsite = Boolean(website) && !fakeWebsiteDomains.some((domain) => website.includes(domain));
-
-        if (includeNoWebsiteOnly && hasRealWebsite) continue;
+        const rawWebsite = details.website ?? null;
+        const hasRealWebsite = hasDirectWebsite(rawWebsite);
 
         const name = (details.name ?? "N/A").trim();
         const phone = details.formatted_phone_number ?? "N/A";
@@ -594,8 +600,8 @@ export async function scrapeLeads({
           businessType,
           phone,
           email: null,
-          websiteUrl: details.website ?? null,
-          websiteStatus: hasRealWebsite ? "LIVE" : "MISSING",
+          websiteUrl: hasRealWebsite ? rawWebsite : null,
+          websiteStatus: hasRealWebsite ? "LIVE" : rawWebsite ? "DIRECTORY_ONLY" : "MISSING",
           socialLinks: [],
           aiResearchSummary: null,
           investorProfile,
