@@ -23,6 +23,8 @@ export async function POST(request: Request) {
 
     const city = String(body.city ?? "").trim();
     const businessType = String(body.businessType ?? "").trim();
+    const investorCategory = String(body.investorCategory ?? "DISTRESSED_SELLERS").trim().toUpperCase();
+    const targetPropertyType = String(body.targetPropertyType ?? "").trim();
 
     if (!city || !businessType) {
       return NextResponse.json({ error: "City and businessType are required." }, { status: 400 });
@@ -30,7 +32,14 @@ export async function POST(request: Request) {
 
     const minRating = Number(body.minRating ?? 0);
     const includeNoWebsiteOnly = Boolean(body.includeNoWebsiteOnly ?? false);
-    const { leads, diagnostics } = await scrapeLeads(city, businessType, Number.isFinite(minRating) ? minRating : 0, includeNoWebsiteOnly);
+    const { leads, diagnostics } = await scrapeLeads({
+      city,
+      businessType,
+      minRating: Number.isFinite(minRating) ? minRating : 0,
+      includeNoWebsiteOnly,
+      investorCategory: investorCategory as Parameters<typeof scrapeLeads>[0]["investorCategory"],
+      targetPropertyType,
+    });
     const inserted = await insertLeads(userId, leads);
 
     return NextResponse.json({ inserted, fetched: leads.length, diagnostics });

@@ -1,5 +1,16 @@
 import { dedupeKey } from "@/lib/utils";
-import type { Lead, LeadEnrichmentPayload, LeadResearchStructuredPayload, Script, ToneOfVoice, UserRole } from "@/lib/types";
+import type {
+  InvestorLeadCategory,
+  InvestorLeadProfile,
+  Lead,
+  LeadEnrichmentPayload,
+  LeadResearchStructuredPayload,
+  RealtorPortal,
+  RealtorPortalWalkthroughStatus,
+  Script,
+  ToneOfVoice,
+  UserRole,
+} from "@/lib/types";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -35,6 +46,119 @@ export type LeadTask = {
   createdAt: string;
   completedAt?: string | null;
 };
+
+export type SaveRealtorPortalInput = {
+  enabled?: boolean;
+  realtorName?: string;
+  realtorEmail?: string;
+  realtorPhone?: string | null;
+  brokerage?: string | null;
+  propertyAddress?: string;
+  portalNote?: string | null;
+  walkthroughScheduledAt?: string | null;
+  cmaUrl?: string | null;
+  cmaFileName?: string | null;
+  cmaNote?: string | null;
+};
+
+function stringOrEmpty(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function stringOrNull(value: unknown) {
+  const normalized = stringOrEmpty(value);
+  return normalized || null;
+}
+
+function stringArray(value: unknown) {
+  return Array.isArray(value) ? value.map((item) => String(item).trim()).filter(Boolean) : [];
+}
+
+function normalizeInvestorLeadProfile(value: unknown): InvestorLeadProfile | null {
+  if (!value || typeof value !== "object") return null;
+
+  const input = value as Record<string, unknown>;
+  const categoryRaw = stringOrEmpty(input.category).toUpperCase();
+  const allowedCategories: InvestorLeadCategory[] = [
+    "DISTRESSED_SELLER",
+    "CASH_BUYER",
+    "WHOLESALER",
+    "AGENT",
+    "PROPERTY_MANAGER",
+    "PROBATE_ATTORNEY",
+    "EVICTION_ATTORNEY",
+    "CONTRACTOR",
+    "OFF_MARKET_LIST",
+    "GENERAL",
+  ];
+
+  const category = (allowedCategories.includes(categoryRaw as InvestorLeadCategory) ? categoryRaw : "GENERAL") as InvestorLeadCategory;
+  const leadScoreRaw = typeof input.leadScore === "number" ? input.leadScore : Number(input.leadScore ?? 0);
+  const leadScore = Number.isFinite(leadScoreRaw) ? Math.max(0, Math.min(100, Math.round(leadScoreRaw))) : 0;
+
+  return {
+    category,
+    targetPropertyType: stringOrNull(input.targetPropertyType),
+    propertyAddress: stringOrNull(input.propertyAddress),
+    ownerName: stringOrNull(input.ownerName),
+    leadType: stringOrNull(input.leadType),
+    leadScore,
+    tags: stringArray(input.tags),
+    motivationSignals: stringArray(input.motivationSignals),
+    recommendedAction: stringOrNull(input.recommendedAction),
+    rationale: stringOrNull(input.rationale),
+    sourceKind:
+      input.sourceKind === "GOOGLE_MAPS" || input.sourceKind === "CSV_IMPORT" || input.sourceKind === "MANUAL"
+        ? input.sourceKind
+        : null,
+  };
+}
+
+function normalizeRealtorPortal(value: unknown): RealtorPortal | null {
+  if (!value || typeof value !== "object") return null;
+
+  const input = value as Record<string, unknown>;
+  const walkthroughInput = input.walkthrough && typeof input.walkthrough === "object"
+    ? (input.walkthrough as Record<string, unknown>)
+    : {};
+  const cmaInput = input.cma && typeof input.cma === "object"
+    ? (input.cma as Record<string, unknown>)
+    : {};
+
+  const token = stringOrEmpty(input.token);
+  if (!token) return null;
+
+  const rawWalkthroughStatus = stringOrEmpty(walkthroughInput.status);
+  const walkthroughStatus: RealtorPortalWalkthroughStatus =
+    rawWalkthroughStatus === "CONFIRMED" || rawWalkthroughStatus === "RESCHEDULE_REQUESTED"
+      ? rawWalkthroughStatus
+      : "PENDING";
+
+  return {
+    enabled: input.enabled !== false,
+    token,
+    realtorName: stringOrEmpty(input.realtorName),
+    realtorEmail: stringOrEmpty(input.realtorEmail),
+    realtorPhone: stringOrNull(input.realtorPhone),
+    brokerage: stringOrNull(input.brokerage),
+    propertyAddress: stringOrEmpty(input.propertyAddress),
+    portalNote: stringOrNull(input.portalNote),
+    walkthrough: {
+      scheduledAt: stringOrNull(walkthroughInput.scheduledAt),
+      status: walkthroughStatus,
+      confirmedAt: stringOrNull(walkthroughInput.confirmedAt),
+      requestMessage: stringOrNull(walkthroughInput.requestMessage),
+    },
+    cma: {
+      url: stringOrNull(cmaInput.url),
+      fileName: stringOrNull(cmaInput.fileName),
+      note: stringOrNull(cmaInput.note),
+      sentAt: stringOrNull(cmaInput.sentAt),
+      viewedAt: stringOrNull(cmaInput.viewedAt),
+    },
+    updatedAt: stringOrNull(input.updatedAt) ?? new Date().toISOString(),
+  };
+}
 
 function parseJsonSafely<T>(value: string): T | null {
   try {
@@ -322,6 +446,7 @@ function leadToMemory(lead: any): Lead {
           ? sourcePayload.ai_research_summary
           : null,
     enrichment: normalizeLeadEnrichmentPayload(sourcePayload.enrichment, lead.businessName ?? lead.business_name, lead.phone),
+    investorProfile: normalizeInvestorLeadProfile(sourcePayload.investorProfile ?? sourcePayload.investor_profile),
     sourceQuery:
       typeof sourcePayload.sourceQuery === "string"
         ? sourcePayload.sourceQuery
@@ -349,6 +474,7 @@ function leadToMemory(lead: any): Lead {
               : undefined,
           }
         : null,
+    realtorPortal: normalizeRealtorPortal(sourcePayload.realtorPortal ?? sourcePayload.realtor_portal),
     closedDealValue:
       (typeof lead.closedDealValue === "number" ? lead.closedDealValue : null) ??
       (typeof lead.closed_deal_value === "number" ? lead.closed_deal_value : null) ??
@@ -406,7 +532,7 @@ export async function saveProfile(userId: string, profile: { niche: string; tone
 }
 
 export async function listLeads(ownerId: string) {
-  if (!hasDb) throw new Error("Supabase environment variables are required to load leads.");
+  if (!hasDb) return [];
   const leads = await withLeadTableFallback((table) => supabaseRequest<any[]>(table, undefined, {
     select: "*",
     [isSnakeLeadsTable(table) ? "owner_id" : "ownerId"]: `eq.${ownerId}`,
@@ -462,7 +588,7 @@ export async function listClaimedLeadCountsByUser(): Promise<ClaimedLeadCountByU
 }
 
 export async function listClaimableLeads(limit = 100) {
-  if (!hasDb) throw new Error("Supabase environment variables are required to load leads.");
+  if (!hasDb) return [];
   const leads = await withLeadTableFallback((table) => supabaseRequest<any[]>(table, undefined, {
     select: "*",
     order: isSnakeLeadsTable(table) ? "updated_at.desc" : "updatedAt.desc",
@@ -471,7 +597,153 @@ export async function listClaimableLeads(limit = 100) {
   return leads.map(leadToMemory);
 }
 
-type CreateLeadInput = { businessName: string; phone?: string | null; websiteUrl?: string | null; aiResearchSummary?: string | null; sourceQuery?: string | null };
+const REALTOR_PORTAL_TEST_LEAD = {
+  businessName: "123 Palm Avenue Test Lead",
+  city: "Miami",
+  businessType: "Off Market Property",
+  phone: "(305) 555-0147",
+  email: "realtor.test@example.com",
+  websiteUrl: "https://sunset-villas-test.example",
+  sourceQuery: "demo_seed",
+};
+
+export async function ensureRealtorPortalTestLead() {
+  if (!hasDb) {
+    return {
+      id: "demo-realtor-portal-lead",
+      businessName: REALTOR_PORTAL_TEST_LEAD.businessName,
+      city: REALTOR_PORTAL_TEST_LEAD.city,
+      businessType: REALTOR_PORTAL_TEST_LEAD.businessType,
+      phone: REALTOR_PORTAL_TEST_LEAD.phone,
+      email: REALTOR_PORTAL_TEST_LEAD.email,
+      websiteUrl: REALTOR_PORTAL_TEST_LEAD.websiteUrl,
+      websiteStatus: null,
+      socialLinks: [],
+      aiResearchSummary: "Seeded demo lead for walkthrough confirmation and CMA portal testing.",
+      enrichment: null,
+      sourceQuery: REALTOR_PORTAL_TEST_LEAD.sourceQuery,
+      contacts: [
+        {
+          id: "demo-realtor-contact",
+          name: "Alicia Realtor",
+          role: "Listing Agent",
+          phones: [REALTOR_PORTAL_TEST_LEAD.phone],
+          emails: [REALTOR_PORTAL_TEST_LEAD.email],
+        },
+      ],
+      demoBooking: null,
+      realtorPortal: null,
+      status: "NEW" as const,
+      deployedUrl: null,
+      siteStatus: "UNBUILT" as const,
+      vercelDeploymentId: null,
+      ownerId: null,
+      closedDealValue: null,
+      closedAt: null,
+      stripeCheckoutLink: null,
+      transferRequests: [],
+      updatedAt: new Date().toISOString(),
+    } satisfies Lead;
+  }
+
+  const domain = REALTOR_PORTAL_TEST_LEAD.websiteUrl.replace(/^https?:\/\//, "");
+  const dedupe = dedupeKey(
+    REALTOR_PORTAL_TEST_LEAD.businessName,
+    REALTOR_PORTAL_TEST_LEAD.city,
+    REALTOR_PORTAL_TEST_LEAD.businessType,
+    REALTOR_PORTAL_TEST_LEAD.phone,
+    domain,
+  );
+
+  const existing = await withLeadTableFallback((table) => supabaseRequest<any[]>(table, undefined, {
+    select: "*",
+    [isSnakeLeadsTable(table) ? "dedupe_key" : "dedupeKey"]: `eq.${dedupe}`,
+    limit: "1",
+  }));
+
+  if (existing[0]) {
+    return leadToMemory(existing[0]);
+  }
+
+  const rows = await withLeadTableFallback((table) => supabaseRequest<any[]>(table, {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify(
+      isSnakeLeadsTable(table)
+        ? {
+            business_name: REALTOR_PORTAL_TEST_LEAD.businessName,
+            city: REALTOR_PORTAL_TEST_LEAD.city,
+            business_type: REALTOR_PORTAL_TEST_LEAD.businessType,
+            phone: REALTOR_PORTAL_TEST_LEAD.phone,
+            email: REALTOR_PORTAL_TEST_LEAD.email,
+            website_url: REALTOR_PORTAL_TEST_LEAD.websiteUrl,
+            normalized_name: REALTOR_PORTAL_TEST_LEAD.businessName.toLowerCase(),
+            normalized_phone: REALTOR_PORTAL_TEST_LEAD.phone.replace(/\D/g, ""),
+            normalized_domain: domain.toLowerCase(),
+            dedupe_key: dedupe,
+            status: "NEW",
+            site_status: "UNBUILT",
+            owner_id: null,
+            source_payload: {
+              sourceQuery: REALTOR_PORTAL_TEST_LEAD.sourceQuery,
+              aiResearchSummary: "Seeded demo lead for walkthrough confirmation and CMA portal testing.",
+              contacts: [
+                {
+                  id: "demo-realtor-contact",
+                  name: "Alicia Realtor",
+                  role: "Listing Agent",
+                  phones: [REALTOR_PORTAL_TEST_LEAD.phone],
+                  emails: [REALTOR_PORTAL_TEST_LEAD.email],
+                },
+              ],
+            },
+          }
+        : {
+            businessName: REALTOR_PORTAL_TEST_LEAD.businessName,
+            city: REALTOR_PORTAL_TEST_LEAD.city,
+            businessType: REALTOR_PORTAL_TEST_LEAD.businessType,
+            phone: REALTOR_PORTAL_TEST_LEAD.phone,
+            email: REALTOR_PORTAL_TEST_LEAD.email,
+            websiteUrl: REALTOR_PORTAL_TEST_LEAD.websiteUrl,
+            normalizedName: REALTOR_PORTAL_TEST_LEAD.businessName.toLowerCase(),
+            normalizedPhone: REALTOR_PORTAL_TEST_LEAD.phone.replace(/\D/g, ""),
+            normalizedDomain: domain.toLowerCase(),
+            dedupeKey: dedupe,
+            status: "NEW",
+            siteStatus: "UNBUILT",
+            ownerId: null,
+            sourcePayload: {
+              sourceQuery: REALTOR_PORTAL_TEST_LEAD.sourceQuery,
+              aiResearchSummary: "Seeded demo lead for walkthrough confirmation and CMA portal testing.",
+              contacts: [
+                {
+                  id: "demo-realtor-contact",
+                  name: "Alicia Realtor",
+                  role: "Listing Agent",
+                  phones: [REALTOR_PORTAL_TEST_LEAD.phone],
+                  emails: [REALTOR_PORTAL_TEST_LEAD.email],
+                },
+              ],
+            },
+          },
+    ),
+  }));
+
+  if (!rows[0]) {
+    throw new Error("Unable to seed the realtor portal test lead.");
+  }
+
+  return leadToMemory(rows[0]);
+}
+
+type CreateLeadInput = {
+  businessName: string;
+  phone?: string | null;
+  websiteUrl?: string | null;
+  aiResearchSummary?: string | null;
+  sourceQuery?: string | null;
+  investorProfile?: InvestorLeadProfile | null;
+};
 
 export async function createOrMergeLead(ownerId: string, lead: CreateLeadInput, options?: { mergeOnDuplicate?: boolean }) {
   if (!hasDb) throw new Error("Supabase environment variables are required to insert leads.");
@@ -502,6 +774,7 @@ export async function createOrMergeLead(ownerId: string, lead: CreateLeadInput, 
               aiResearchSummary: lead.aiResearchSummary ?? null,
               enrichment: null,
               sourceQuery: lead.sourceQuery ?? "manual_entry",
+              investorProfile: lead.investorProfile ?? null,
             },
           }
         : {
@@ -522,6 +795,7 @@ export async function createOrMergeLead(ownerId: string, lead: CreateLeadInput, 
               aiResearchSummary: lead.aiResearchSummary ?? null,
               enrichment: null,
               sourceQuery: lead.sourceQuery ?? "manual_entry",
+              investorProfile: lead.investorProfile ?? null,
             },
           }),
     }));
@@ -560,6 +834,7 @@ export async function createOrMergeLead(ownerId: string, lead: CreateLeadInput, 
               sourceQuery: typeof existingPayload.sourceQuery === "string" && existingPayload.sourceQuery.trim()
                 ? existingPayload.sourceQuery
                 : lead.sourceQuery ?? "csv_import",
+              investorProfile: normalizeInvestorLeadProfile(existingPayload.investorProfile ?? existingPayload.investor_profile) ?? lead.investorProfile ?? null,
             },
           }
         : {
@@ -574,6 +849,7 @@ export async function createOrMergeLead(ownerId: string, lead: CreateLeadInput, 
               sourceQuery: typeof existingPayload.sourceQuery === "string" && existingPayload.sourceQuery.trim()
                 ? existingPayload.sourceQuery
                 : lead.sourceQuery ?? "csv_import",
+              investorProfile: normalizeInvestorLeadProfile(existingPayload.investorProfile ?? existingPayload.investor_profile) ?? lead.investorProfile ?? null,
             },
           };
 
@@ -633,6 +909,7 @@ export async function insertLeads(ownerId: string, leads: Omit<Lead, "id" | "upd
                 aiResearchSummary: lead.aiResearchSummary ?? null,
                 enrichment: lead.enrichment ?? null,
                 sourceQuery: lead.sourceQuery ?? null,
+                investorProfile: lead.investorProfile ?? null,
               },
             }
           : {
@@ -655,6 +932,7 @@ export async function insertLeads(ownerId: string, leads: Omit<Lead, "id" | "upd
                 aiResearchSummary: lead.aiResearchSummary ?? null,
                 enrichment: lead.enrichment ?? null,
                 sourceQuery: lead.sourceQuery ?? null,
+                investorProfile: lead.investorProfile ?? null,
               },
             }),
       }));
@@ -1066,6 +1344,162 @@ export async function requestLeadOwnershipTransfer(leadId: string, requesterId: 
 export async function getLeadById(leadId: string, ownerId: string) {
   const leads = await listLeads(ownerId);
   return leads.find((lead) => lead.id === leadId);
+}
+
+async function getRawLeadById(leadId: string) {
+  if (!hasDb) throw new Error("Supabase environment variables are required to load leads.");
+
+  const rows = await withLeadTableFallback((table) => supabaseRequest<any[]>(table, undefined, {
+    select: "*",
+    id: `eq.${leadId}`,
+    limit: "1",
+  }));
+
+  return rows[0] ?? null;
+}
+
+async function updateLeadPayloadRecord(leadId: string, nextPayload: Record<string, unknown>) {
+  if (!hasDb) throw new Error("Supabase environment variables are required to update leads.");
+
+  await withLeadTableFallback((table) => supabaseRequest(table, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify(
+      isSnakeLeadsTable(table)
+        ? { source_payload: nextPayload }
+        : { sourcePayload: nextPayload },
+    ),
+  }, { id: `eq.${leadId}` }));
+}
+
+function buildDefaultRealtorPortal(lead: Lead, existing: RealtorPortal | null = null): RealtorPortal {
+  return {
+    enabled: existing?.enabled ?? true,
+    token: existing?.token ?? crypto.randomUUID(),
+    realtorName: existing?.realtorName ?? "",
+    realtorEmail: existing?.realtorEmail ?? "",
+    realtorPhone: existing?.realtorPhone ?? null,
+    brokerage: existing?.brokerage ?? null,
+    propertyAddress: existing?.propertyAddress ?? `${lead.businessName}${lead.city ? `, ${lead.city}` : ""}`,
+    portalNote: existing?.portalNote ?? null,
+    walkthrough: {
+      scheduledAt: existing?.walkthrough.scheduledAt ?? null,
+      status: existing?.walkthrough.status ?? "PENDING",
+      confirmedAt: existing?.walkthrough.confirmedAt ?? null,
+      requestMessage: existing?.walkthrough.requestMessage ?? null,
+    },
+    cma: {
+      url: existing?.cma.url ?? null,
+      fileName: existing?.cma.fileName ?? null,
+      note: existing?.cma.note ?? null,
+      sentAt: existing?.cma.sentAt ?? null,
+      viewedAt: existing?.cma.viewedAt ?? null,
+    },
+    updatedAt: existing?.updatedAt ?? new Date().toISOString(),
+  };
+}
+
+export async function saveLeadRealtorPortal(ownerId: string | null, leadId: string, input: SaveRealtorPortalInput) {
+  const rawLead = await getRawLeadById(leadId);
+  if (!rawLead) throw new Error("Lead not found.");
+
+  const leadOwnerId = rawLead.owner_id ?? rawLead.ownerId ?? null;
+  if (ownerId && leadOwnerId && leadOwnerId !== ownerId) throw new Error("Forbidden");
+
+  const payload = (rawLead.source_payload ?? rawLead.sourcePayload ?? {}) as Record<string, unknown>;
+  const existingPortal = normalizeRealtorPortal(payload.realtorPortal ?? payload.realtor_portal);
+  const lead = leadToMemory(rawLead);
+  const currentPortal = buildDefaultRealtorPortal(lead, existingPortal);
+  const now = new Date().toISOString();
+  const nextScheduledAt = input.walkthroughScheduledAt === undefined
+    ? currentPortal.walkthrough.scheduledAt
+    : (input.walkthroughScheduledAt ? input.walkthroughScheduledAt : null);
+  const scheduledAtChanged = nextScheduledAt !== currentPortal.walkthrough.scheduledAt;
+  const nextCmaUrl = input.cmaUrl === undefined ? currentPortal.cma.url : input.cmaUrl;
+  const cmaUrlChanged = nextCmaUrl !== currentPortal.cma.url;
+
+  const nextPortal: RealtorPortal = {
+    ...currentPortal,
+    enabled: input.enabled ?? currentPortal.enabled,
+    realtorName: input.realtorName === undefined ? currentPortal.realtorName : input.realtorName.trim(),
+    realtorEmail: input.realtorEmail === undefined ? currentPortal.realtorEmail : input.realtorEmail.trim(),
+    realtorPhone: input.realtorPhone === undefined ? currentPortal.realtorPhone : stringOrNull(input.realtorPhone),
+    brokerage: input.brokerage === undefined ? currentPortal.brokerage : stringOrNull(input.brokerage),
+    propertyAddress: input.propertyAddress === undefined ? currentPortal.propertyAddress : input.propertyAddress.trim(),
+    portalNote: input.portalNote === undefined ? currentPortal.portalNote : stringOrNull(input.portalNote),
+    walkthrough: {
+      scheduledAt: nextScheduledAt,
+      status: scheduledAtChanged ? "PENDING" : currentPortal.walkthrough.status,
+      confirmedAt: scheduledAtChanged ? null : currentPortal.walkthrough.confirmedAt,
+      requestMessage: scheduledAtChanged ? null : currentPortal.walkthrough.requestMessage,
+    },
+    cma: {
+      url: nextCmaUrl ?? null,
+      fileName: input.cmaFileName === undefined ? currentPortal.cma.fileName : stringOrNull(input.cmaFileName),
+      note: input.cmaNote === undefined ? currentPortal.cma.note : stringOrNull(input.cmaNote),
+      sentAt: cmaUrlChanged && nextCmaUrl ? now : currentPortal.cma.sentAt,
+      viewedAt: cmaUrlChanged ? null : currentPortal.cma.viewedAt,
+    },
+    updatedAt: now,
+  };
+
+  await updateLeadPayloadRecord(leadId, { ...payload, realtorPortal: nextPortal });
+  return nextPortal;
+}
+
+export async function getLeadRealtorPortal(leadId: string, token: string) {
+  const rawLead = await getRawLeadById(leadId);
+  if (!rawLead) return null;
+
+  const payload = (rawLead.source_payload ?? rawLead.sourcePayload ?? {}) as Record<string, unknown>;
+  const portal = normalizeRealtorPortal(payload.realtorPortal ?? payload.realtor_portal);
+  if (!portal || !portal.enabled || !token || token !== portal.token) return null;
+
+  return {
+    lead: leadToMemory(rawLead),
+    portal,
+  };
+}
+
+export async function updateLeadRealtorPortalFromPublic(
+  leadId: string,
+  token: string,
+  input: { action: "confirm_walkthrough" | "request_reschedule" | "mark_cma_viewed"; message?: string | null },
+) {
+  const rawLead = await getRawLeadById(leadId);
+  if (!rawLead) throw new Error("Lead not found.");
+
+  const payload = (rawLead.source_payload ?? rawLead.sourcePayload ?? {}) as Record<string, unknown>;
+  const portal = normalizeRealtorPortal(payload.realtorPortal ?? payload.realtor_portal);
+  if (!portal || !portal.enabled || token !== portal.token) throw new Error("Invalid portal link.");
+
+  const now = new Date().toISOString();
+  const trimmedMessage = stringOrNull(input.message);
+  const nextPortal: RealtorPortal = {
+    ...portal,
+    walkthrough: { ...portal.walkthrough },
+    cma: { ...portal.cma },
+    updatedAt: now,
+  };
+
+  if (input.action === "confirm_walkthrough") {
+    nextPortal.walkthrough.status = "CONFIRMED";
+    nextPortal.walkthrough.confirmedAt = now;
+    nextPortal.walkthrough.requestMessage = trimmedMessage;
+  }
+
+  if (input.action === "request_reschedule") {
+    nextPortal.walkthrough.status = "RESCHEDULE_REQUESTED";
+    nextPortal.walkthrough.confirmedAt = null;
+    nextPortal.walkthrough.requestMessage = trimmedMessage;
+  }
+
+  if (input.action === "mark_cma_viewed" && nextPortal.cma.url) {
+    nextPortal.cma.viewedAt = now;
+  }
+
+  await updateLeadPayloadRecord(leadId, { ...payload, realtorPortal: nextPortal });
+  return nextPortal;
 }
 
 function normalizeLeadNote(row: any): LeadNote {

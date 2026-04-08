@@ -1,4 +1,4 @@
-import type { Lead, LeadEnrichmentPayload, LeadResearchSocialLinks, LeadResearchStructuredPayload } from "@/lib/types";
+import type { InvestorLeadCategory, InvestorLeadProfile, Lead, LeadEnrichmentPayload, LeadResearchSocialLinks, LeadResearchStructuredPayload } from "@/lib/types";
 
 type GooglePlaceSearchResponse = {
   status?: string;
@@ -27,6 +27,57 @@ const MAX_PLACE_DETAILS_LOOKUPS_PER_RUN = 80;
 const MAX_LEADS_PER_RUN = 40;
 const SCRAPE_RUNTIME_BUDGET_MS = 45000;
 
+type ScrapeMode = "DISTRESSED_SELLERS" | "CASH_BUYERS" | "REALTORS" | "WHOLESALERS" | "PROPERTY_MANAGERS" | "CONTRACTORS";
+
+type ScrapeOptions = {
+  city: string;
+  businessType: string;
+  minRating?: number;
+  includeNoWebsiteOnly?: boolean;
+  investorCategory?: ScrapeMode;
+  targetPropertyType?: string;
+};
+
+const INVESTOR_SCRAPE_PRESETS: Record<
+  ScrapeMode,
+  {
+    leadCategory: InvestorLeadCategory;
+    fallbackTerms: string[];
+    defaultAction: string;
+  }
+> = {
+  DISTRESSED_SELLERS: {
+    leadCategory: "DISTRESSED_SELLER",
+    fallbackTerms: ["probate attorney", "eviction attorney", "bankruptcy attorney", "estate sale company", "property manager"],
+    defaultAction: "Build a referral relationship and ask about owners dealing with distress, probate, vacancy, or fast-sale situations.",
+  },
+  CASH_BUYERS: {
+    leadCategory: "CASH_BUYER",
+    fallbackTerms: ["cash home buyer", "we buy houses", "house buying company", "investment property buyer"],
+    defaultAction: "Qualify this contact as an active buyer and capture buy box, markets, and proof-of-funds expectations.",
+  },
+  REALTORS: {
+    leadCategory: "AGENT",
+    fallbackTerms: ["realtor", "real estate agent", "listing agent", "real estate broker"],
+    defaultAction: "Pitch investor-friendly referrals, off-market collaboration, and fast-close options for difficult listings.",
+  },
+  WHOLESALERS: {
+    leadCategory: "WHOLESALER",
+    fallbackTerms: ["real estate wholesaler", "off market property buyer", "assignment contract buyer", "investment home buyer"],
+    defaultAction: "Qualify deal flow, assignment expectations, and the type of inventory they can send or buy.",
+  },
+  PROPERTY_MANAGERS: {
+    leadCategory: "PROPERTY_MANAGER",
+    fallbackTerms: ["property manager", "rental property management", "apartment management company", "leasing company"],
+    defaultAction: "Ask about tired landlords, vacancy issues, and owners who may prefer a direct sale over another turn.",
+  },
+  CONTRACTORS: {
+    leadCategory: "CONTRACTOR",
+    fallbackTerms: ["general contractor", "roofer", "foundation repair", "junk removal", "fire damage restoration"],
+    defaultAction: "Use the relationship to surface distressed properties, rehab needs, and owners needing a fast exit.",
+  },
+};
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -36,26 +87,24 @@ function cleanPhoneNumber(phoneStr?: string | null) {
   return phoneStr.replace(/\D/g, "");
 }
 
-function buildSearchQueries(city: string, businessType: string) {
+function buildSearchQueries(city: string, businessType: string, investorCategory: ScrapeMode, targetPropertyType?: string) {
   const cleanCity = city.trim();
   const cleanBusinessType = businessType.trim();
+  const cleanPropertyType = targetPropertyType?.trim() || "";
+  const preset = INVESTOR_SCRAPE_PRESETS[investorCategory];
+  const coreTerms = Array.from(new Set([cleanBusinessType, ...preset.fallbackTerms].map((term) => term.trim()).filter(Boolean)));
+  const propertySuffix = cleanPropertyType ? ` ${cleanPropertyType}` : "";
 
-  const baseQueries = [
-    `${cleanBusinessType} ${cleanCity}`,
-    `${cleanBusinessType} in ${cleanCity}`,
-    `${cleanBusinessType} near ${cleanCity}`,
-    `best ${cleanBusinessType} ${cleanCity}`,
-    `${cleanBusinessType} services ${cleanCity}`,
-    `local ${cleanBusinessType} ${cleanCity}`,
-    `${cleanBusinessType} company ${cleanCity}`,
-    `${cleanBusinessType} contractor ${cleanCity}`,
-    `${cleanBusinessType} repair ${cleanCity}`,
-    `${cleanBusinessType} installation ${cleanCity}`,
-    `${cleanBusinessType} maintenance ${cleanCity}`,
-    `${cleanBusinessType} emergency ${cleanCity}`,
-  ];
+  const baseQueries = coreTerms.flatMap((term) => [
+    `${term} ${cleanCity}`,
+    `${term} in ${cleanCity}`,
+    `${term}${propertySuffix} ${cleanCity}`.trim(),
+    `${term} near ${cleanCity}`,
+    `${term} motivated seller ${cleanCity}`,
+    `${term} real estate investor ${cleanCity}`,
+  ]);
 
-  return Array.from(new Set(baseQueries.map((query) => query.trim()).filter(Boolean)));
+  return Array.from(new Set(baseQueries.map((query) => query.trim()).filter(Boolean))).slice(0, 24);
 }
 
 async function fetchJsonWithTimeout<T>(url: string, timeoutMs = SCRAPE_FETCH_TIMEOUT_MS) {
@@ -100,13 +149,14 @@ async function callGeminiText(prompt: string, geminiApiKey?: string): Promise<st
   }
 }
 
-async function generateMicroQueries(userPrompt: string, geminiApiKey?: string) {
-  const fallback = buildSearchQueries(userPrompt.split(" in ").slice(1).join(" in ") || userPrompt, userPrompt.split(" in ")[0] || userPrompt);
+async function generateMicroQueries(userPrompt: string, investorCategory: ScrapeMode, city: string, businessType: string, targetPropertyType?: string, geminiApiKey?: string) {
+  const fallback = buildSearchQueries(city, businessType, investorCategory, targetPropertyType);
   if (!geminiApiKey) return fallback;
 
-  const prompt = `You are an elite local SEO expert building Google Maps micro-queries.
-Generate 60 to 90 highly specific, local search queries for: "${userPrompt}".
-Use multiple keyword variations and include neighborhoods/zip/city variants.
+  const prompt = `You are helping a real estate investor build Google Maps search queries for lead sources and partner channels.
+Generate 40 to 60 highly specific Google Maps queries for: "${userPrompt}".
+Priority: motivated seller referral sources, investor-friendly professionals, buyer/disposition partners, and operators adjacent to distressed property situations.
+Include neighborhoods, suburbs, city variants, and relevant commercial wording.
 Return ONLY a comma-separated list. No bullets, no markdown, no explanation.`;
 
   const raw = await callGeminiText(prompt, geminiApiKey);
@@ -117,6 +167,67 @@ Return ONLY a comma-separated list. No bullets, no markdown, no explanation.`;
 
   const merged = Array.from(new Set([...fallback, ...aiQueries]));
   return merged.slice(0, MAX_AI_MICRO_QUERIES);
+}
+
+function inferMotivationSignals(query: string, businessType: string, category: InvestorLeadCategory) {
+  const text = `${query} ${businessType}`.toLowerCase();
+  const signals = new Set<string>();
+
+  if (text.includes("probate")) signals.add("probate");
+  if (text.includes("eviction")) signals.add("eviction");
+  if (text.includes("bankruptcy")) signals.add("bankruptcy");
+  if (text.includes("estate")) signals.add("estate transition");
+  if (text.includes("property manager")) signals.add("tired landlord access");
+  if (text.includes("cash buyer") || text.includes("we buy houses")) signals.add("active buyer");
+  if (text.includes("wholesaler")) signals.add("off-market inventory");
+  if (text.includes("realtor") || text.includes("broker")) signals.add("listing access");
+  if (text.includes("contractor") || text.includes("repair") || text.includes("restoration")) signals.add("distress visibility");
+  if (category === "DISTRESSED_SELLER" && signals.size === 0) signals.add("motivated seller adjacency");
+
+  return Array.from(signals);
+}
+
+function buildInvestorLeadProfile(input: {
+  investorCategory: ScrapeMode;
+  targetPropertyType?: string;
+  query: string;
+  businessType: string;
+  hasRealWebsite: boolean;
+  rating: number;
+  reviewCount: number;
+  name: string;
+  city: string;
+}): InvestorLeadProfile {
+  const preset = INVESTOR_SCRAPE_PRESETS[input.investorCategory];
+  const motivationSignals = inferMotivationSignals(input.query, input.businessType, preset.leadCategory);
+  let score = 50;
+  if (!input.hasRealWebsite) score += 12;
+  if (input.rating >= 4.2) score += 8;
+  if (input.reviewCount >= 15) score += 6;
+  if (motivationSignals.includes("probate") || motivationSignals.includes("eviction") || motivationSignals.includes("bankruptcy")) score += 14;
+  if (preset.leadCategory === "CASH_BUYER" || preset.leadCategory === "WHOLESALER") score += 8;
+  score = Math.max(25, Math.min(100, score));
+
+  const tags = [
+    preset.leadCategory.replaceAll("_", " "),
+    input.targetPropertyType ? `${input.targetPropertyType} focus` : null,
+    !input.hasRealWebsite ? "No direct website" : "Has website",
+    input.rating > 0 ? `${input.rating.toFixed(1)} Google rating` : null,
+  ].filter(Boolean) as string[];
+
+  return {
+    category: preset.leadCategory,
+    targetPropertyType: input.targetPropertyType || null,
+    propertyAddress: null,
+    ownerName: null,
+    leadType: input.businessType,
+    leadScore: score,
+    tags,
+    motivationSignals,
+    recommendedAction: preset.defaultAction,
+    rationale: `${input.name} surfaced from "${input.query}" in ${input.city}. ${!input.hasRealWebsite ? "No direct website increases outreach opportunity." : "Established local presence may support partnership credibility."}`,
+    sourceKind: "GOOGLE_MAPS",
+  };
 }
 
 async function fetchSearchPage(params: URLSearchParams) {
@@ -233,10 +344,10 @@ async function researchLeadWithGemini(name: string, phone: string, address: stri
 
   if (!geminiApiKey) return fallback;
 
-  const prompt = `You are an expert lead generation researcher.
-Research the business and return ONLY strict JSON with this shape:
+  const prompt = `You are an expert real estate investor lead researcher.
+Research this company or contact and return ONLY strict JSON with this shape:
 {
-  "summary": "2-3 sentence, human-readable sales summary.",
+  "summary": "2-3 sentence, human-readable investor summary focused on why this lead matters for acquisitions, referrals, buyers, or dispo.",
   "structured": {
     "businessName": "string",
     "primaryPhone": "string|null",
@@ -264,6 +375,7 @@ Rules:
 - Return JSON only. No markdown.
 - Use null or empty arrays/objects when unknown.
 - confidence must be a number from 0 to 1.
+- Favor investor-relevant details such as referral fit, lead source potential, signs of active inventory, and why a rep should contact them.
 Business Name: ${name}
 Phone: ${phone}
 Address: ${address}`;
@@ -302,12 +414,14 @@ export type ScrapeDiagnostics = {
   skippedByDedupe: number;
 };
 
-export async function scrapeLeads(
-  city: string,
-  businessType: string,
+export async function scrapeLeads({
+  city,
+  businessType,
   minRating = 0,
   includeNoWebsiteOnly = false,
-): Promise<{ leads: Omit<Lead, "id" | "updatedAt" | "status">[]; diagnostics: ScrapeDiagnostics }> {
+  investorCategory = "DISTRESSED_SELLERS",
+  targetPropertyType = "",
+}: ScrapeOptions): Promise<{ leads: Omit<Lead, "id" | "updatedAt" | "status">[]; diagnostics: ScrapeDiagnostics }> {
   const mapsApiKey = process.env.MAPS_API_KEY;
   if (!mapsApiKey) {
     throw new Error("MAPS_API_KEY is required to scrape leads with Google Places API.");
@@ -346,8 +460,8 @@ export async function scrapeLeads(
     skippedByDedupe: 0,
   };
 
-  const querySeed = `${businessType} in ${city}`;
-  const queries = await generateMicroQueries(querySeed, geminiApiKey);
+  const querySeed = `${businessType} in ${city} for ${investorCategory.replaceAll("_", " ").toLowerCase()}${targetPropertyType ? ` targeting ${targetPropertyType}` : ""}`;
+  const queries = await generateMicroQueries(querySeed, investorCategory, city, businessType, targetPropertyType, geminiApiKey);
   const startedAt = Date.now();
 
   const isRuntimeBudgetExceeded = () => Date.now() - startedAt >= SCRAPE_RUNTIME_BUDGET_MS;
@@ -456,10 +570,23 @@ export async function scrapeLeads(
         if (normalizedPhone) seenPhones.add(normalizedPhone);
 
         const rating = details.rating ?? 0;
+        const reviewCount = details.user_ratings_total ?? 0;
         if (rating < minRating) {
           diagnostics.skippedByRating += 1;
           continue;
         }
+
+        const investorProfile = buildInvestorLeadProfile({
+          investorCategory,
+          targetPropertyType,
+          query,
+          businessType,
+          hasRealWebsite,
+          rating,
+          reviewCount,
+          name,
+          city,
+        });
 
         leads.push({
           businessName: name,
@@ -471,6 +598,7 @@ export async function scrapeLeads(
           websiteStatus: hasRealWebsite ? "LIVE" : "MISSING",
           socialLinks: [],
           aiResearchSummary: null,
+          investorProfile,
           sourceQuery: query,
           ownerId: null,
           deployedUrl: null,

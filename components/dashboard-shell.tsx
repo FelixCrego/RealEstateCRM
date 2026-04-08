@@ -24,6 +24,7 @@ import {
   CalendarDays,
   CircleDollarSign,
   Menu,
+  Building2,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useRole } from "@/components/role-context";
@@ -54,6 +55,7 @@ const navByRole: Record<UserRole, NavItem[]> = {
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/scrape", label: "Scrape Leads", icon: Search },
     { href: "/leads", label: "My Leads", icon: Users },
+    { href: "/realtor-portal", label: "Realtor Portal", icon: Building2 },
     { href: "/closed-deals", label: "Closed Deals", icon: CircleDollarSign },
     { href: "/pipeline", label: "Pipeline", icon: Flame },
     { href: "/demos", label: "Upcoming Demos", icon: CalendarDays },
@@ -64,6 +66,7 @@ const navByRole: Record<UserRole, NavItem[]> = {
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/scrape", label: "Scrape Leads", icon: Search },
     { href: "/leads", label: "My Leads", icon: Users },
+    { href: "/realtor-portal", label: "Realtor Portal", icon: Building2 },
     { href: "/closed-deals", label: "Closed Deals", icon: CircleDollarSign },
     { href: "/pipeline", label: "Pipeline", icon: Flame },
     { href: "/demos", label: "Upcoming Demos", icon: CalendarDays },
@@ -73,12 +76,14 @@ const navByRole: Record<UserRole, NavItem[]> = {
   ],
   MANAGER: [
     { href: "/dashboard", label: "Manager Dashboard", icon: Gauge },
+    { href: "/realtor-portal", label: "Realtor Portal", icon: Building2 },
     { href: "/territory-setup", label: "Territory Setup", icon: MapIcon },
     { href: "/rep-performance", label: "Rep Performance", icon: Trophy },
     { href: "/payouts", label: "Payouts", icon: Briefcase },
   ],
   SUPER_ADMIN: [
     { href: "/dashboard", label: "Global Command Center", icon: Shield },
+    { href: "/realtor-portal", label: "Realtor Portal", icon: Building2 },
     { href: "/billing", label: "Billing/Stripe", icon: Banknote },
     { href: "/user-management", label: "User Management", icon: Users },
     { href: "/system-logs", label: "System Logs", icon: ScrollText },

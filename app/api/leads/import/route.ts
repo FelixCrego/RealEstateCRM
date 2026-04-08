@@ -1,3 +1,4 @@
+import type { InvestorLeadProfile } from "@/lib/types";
 import { NextResponse } from "next/server";
 import { getAuthenticatedUserId } from "@/lib/auth";
 import { createOrMergeLead } from "@/lib/store";
@@ -8,6 +9,7 @@ type ImportLeadInput = {
   websiteUrl?: unknown;
   aiResearchSummary?: unknown;
   sourceQuery?: unknown;
+  investorProfile?: unknown;
 };
 
 export async function POST(request: Request) {
@@ -37,6 +39,7 @@ export async function POST(request: Request) {
         websiteUrl: typeof lead?.websiteUrl === "string" ? lead.websiteUrl.trim() || null : null,
         aiResearchSummary: typeof lead?.aiResearchSummary === "string" ? lead.aiResearchSummary.trim() || null : null,
         sourceQuery: typeof lead?.sourceQuery === "string" ? lead.sourceQuery.trim() || "csv_import" : "csv_import",
+        investorProfile: (lead?.investorProfile && typeof lead.investorProfile === "object" ? lead.investorProfile : null) as InvestorLeadProfile | null,
       }, {
         mergeOnDuplicate: Boolean(body.mergeDuplicates),
       });
