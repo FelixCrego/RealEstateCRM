@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import {
   AUTH_ACCESS_TOKEN_COOKIE,
+  AUTH_BYPASS_ENABLED,
+  AUTH_BYPASS_USER_EMAIL,
+  AUTH_BYPASS_USER_ID,
   AUTH_REFRESH_TOKEN_COOKIE,
   AUTH_USER_HEADER,
   AUTH_USER_EMAIL_HEADER,
@@ -10,7 +13,6 @@ import {
 } from "@/lib/auth";
 
 const PUBLIC_PATHS = ["/login", "/signup", "/api/auth/login", "/api/auth/signup"];
-const AUTH_BYPASS_ENABLED = process.env.NODE_ENV !== "production";
 
 function isPublicPath(pathname: string) {
   return PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
@@ -28,7 +30,10 @@ function unauthorizedResponse(request: NextRequest) {
 
 export async function middleware(request: NextRequest) {
   if (AUTH_BYPASS_ENABLED) {
-    return NextResponse.next();
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set(AUTH_USER_HEADER, AUTH_BYPASS_USER_ID);
+    requestHeaders.set(AUTH_USER_EMAIL_HEADER, AUTH_BYPASS_USER_EMAIL);
+    return NextResponse.next({ request: { headers: requestHeaders } });
   }
 
   const { pathname } = request.nextUrl;

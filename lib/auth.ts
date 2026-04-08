@@ -4,6 +4,9 @@ export const AUTH_ACCESS_TOKEN_COOKIE = "felix_access_token";
 export const AUTH_REFRESH_TOKEN_COOKIE = "felix_refresh_token";
 export const AUTH_USER_HEADER = "x-felix-user-id";
 export const AUTH_USER_EMAIL_HEADER = "x-felix-user-email";
+export const AUTH_BYPASS_ENABLED = process.env.AUTH_BYPASS_ENABLED !== "false";
+export const AUTH_BYPASS_USER_ID = "demo-user";
+export const AUTH_BYPASS_USER_EMAIL = "demo@felixcrm.local";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -157,6 +160,8 @@ export async function getSupabaseUserByAccessToken(accessToken: string): Promise
 }
 
 export async function getAuthenticatedUserId() {
+  if (AUTH_BYPASS_ENABLED) return AUTH_BYPASS_USER_ID;
+
   const forwardedUserId = headers().get(AUTH_USER_HEADER);
   if (forwardedUserId) return forwardedUserId;
 
@@ -168,6 +173,13 @@ export async function getAuthenticatedUserId() {
 }
 
 export async function getAuthenticatedUser() {
+  if (AUTH_BYPASS_ENABLED) {
+    return {
+      id: AUTH_BYPASS_USER_ID,
+      email: AUTH_BYPASS_USER_EMAIL,
+    };
+  }
+
   const forwardedUserId = headers().get(AUTH_USER_HEADER);
   if (forwardedUserId) {
     return {
