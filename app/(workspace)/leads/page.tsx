@@ -1,21 +1,24 @@
 import { LeadsListView } from "@/components/leads/leads-list-view";
-import { ensureRealtorPortalTestLead, listClaimableLeads, listLeads } from "@/lib/store";
-import { getAuthenticatedUserId } from "@/lib/auth";
+import { AUTH_BYPASS_ENABLED, getAuthenticatedUserId } from "@/lib/auth";
+import { buildDemoOfferDeskLeads } from "@/lib/investor-demo-content";
+import { listClaimableLeads, listLeads } from "@/lib/store";
 
 export default async function LeadsPage() {
   try {
     const userId = await getAuthenticatedUserId();
-    const testLead = await ensureRealtorPortalTestLead();
+
+    if (AUTH_BYPASS_ENABLED) {
+      const claimableLeads = await listClaimableLeads(200);
+      return <LeadsListView leads={claimableLeads.length > 0 ? claimableLeads : buildDemoOfferDeskLeads()} />;
+    }
 
     if (!userId) {
       const claimableLeads = await listClaimableLeads(200);
-      const combinedLeads = [testLead, ...claimableLeads.filter((lead) => lead.id !== testLead.id)];
-      return <LeadsListView leads={combinedLeads} />;
+      return <LeadsListView leads={claimableLeads.length > 0 ? claimableLeads : buildDemoOfferDeskLeads()} />;
     }
 
     const userLeads = await listLeads(userId);
-    const combinedLeads = userLeads.length > 0 ? userLeads : [testLead];
-    return <LeadsListView leads={combinedLeads} />;
+    return <LeadsListView leads={userLeads} />;
   } catch (error) {
     return <LeadsListView leads={[]} errorMessage={error instanceof Error ? error.message : "Failed to load leads."} />;
   }

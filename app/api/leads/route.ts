@@ -1,7 +1,8 @@
 export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
+import { AUTH_BYPASS_ENABLED, getAuthenticatedUserId } from "@/lib/auth";
+import { buildDemoOfferDeskLeads } from "@/lib/investor-demo-content";
 import { createLead, deleteLeads, listClaimableLeads, listLeads, releaseStaleLeads } from "@/lib/store";
-import { getAuthenticatedUserId } from "@/lib/auth";
 
 export async function GET(request: Request) {
   try {
@@ -9,7 +10,17 @@ export async function GET(request: Request) {
     if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     await releaseStaleLeads();
     const scope = new URL(request.url).searchParams.get("scope");
-    const leads = scope === "all" ? await listClaimableLeads(200) : await listLeads(userId);
+    const claimableLeads = await listClaimableLeads(200);
+    const leads =
+      scope === "all"
+        ? claimableLeads.length > 0 || !AUTH_BYPASS_ENABLED
+          ? claimableLeads
+          : buildDemoOfferDeskLeads()
+        : AUTH_BYPASS_ENABLED
+          ? claimableLeads.length > 0
+            ? claimableLeads
+            : buildDemoOfferDeskLeads()
+          : await listLeads(userId);
     return NextResponse.json({ leads });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to load leads." }, { status: 500 });
