@@ -1,10 +1,24 @@
-const earnings = [5, 12, 9, 18, 16, 24, 27, 30];
+const COMMISSION_FLOOR = 2500;
+const COMMISSION_RATE = 0.1;
 
-const ledger = [
-  { deal: "Bloom Pediatrics", date: "2026-02-18", commission: "$1,100.00", bonus: "$250.00", status: "Cleared" },
-  { deal: "Northline Roofing", date: "2026-02-22", commission: "$1,450.00", bonus: "$400.00", status: "Pending" },
-  { deal: "Maverick Legal", date: "2026-02-27", commission: "$1,300.00", bonus: "$350.00", status: "Cleared" },
-];
+const dealLedger = [
+  { property: "2147 E Cedar Vista Dr, Phoenix, AZ", date: "2026-03-03", wholesaleValue: 18000, bonus: 0, status: "Cleared" },
+  { property: "99 E 127th St, Cleveland, OH", date: "2026-03-08", wholesaleValue: 32000, bonus: 500, status: "Pending" },
+  { property: "213 Pine Orchard Dr, Indianapolis, IN", date: "2026-03-14", wholesaleValue: 24000, bonus: 250, status: "Cleared" },
+  { property: "41 Timber Crest, San Antonio, TX", date: "2026-03-22", wholesaleValue: 22000, bonus: 0, status: "Cleared" },
+] as const;
+
+function calculateCommission(wholesaleValue: number) {
+  return Math.max(Math.round(wholesaleValue * COMMISSION_RATE), COMMISSION_FLOOR);
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
 
 function QuotaRing({
   label,
@@ -61,8 +75,27 @@ function QuotaRing({
 }
 
 export default function CommissionsPage() {
+  const ledger = dealLedger.map((deal) => ({
+    ...deal,
+    commission: calculateCommission(deal.wholesaleValue),
+  }));
+
+  const availableForWithdrawal = ledger
+    .filter((deal) => deal.status === "Cleared")
+    .reduce((sum, deal) => sum + deal.commission + deal.bonus, 0);
+  const pendingCommission = ledger
+    .filter((deal) => deal.status === "Pending")
+    .reduce((sum, deal) => sum + deal.commission + deal.bonus, 0);
+  const totalWholesaleVolume = ledger.reduce((sum, deal) => sum + deal.wholesaleValue, 0);
+  const totalCommission = ledger.reduce((sum, deal) => sum + deal.commission, 0);
+  const averageAssignment = Math.round(totalWholesaleVolume / ledger.length);
+  const commissionGoal = 12000;
+  const commissionProgress = Math.min(100, Math.round((totalCommission / commissionGoal) * 100));
+  const volumeGoal = 120000;
+  const volumeProgress = Math.min(100, Math.round((totalWholesaleVolume / volumeGoal) * 100));
+  const earnings = ledger.map((deal) => Math.round((deal.commission + deal.bonus) / 100));
   const points = earnings
-    .map((point, idx) => `${(idx / (earnings.length - 1)) * 100},${100 - (point / 32) * 100}`)
+    .map((point, idx) => `${(idx / Math.max(1, earnings.length - 1)) * 100},${100 - (point / 40) * 100}`)
     .join(" ");
 
   return (
@@ -70,71 +103,91 @@ export default function CommissionsPage() {
       <section className="grid gap-4 xl:grid-cols-[1.2fr_1fr]">
         <div className="rounded-2xl border border-zinc-800 bg-gradient-to-br from-zinc-900 via-zinc-900 to-zinc-950 p-6">
           <p className="text-xs uppercase tracking-[0.2em] text-zinc-400">Available for Withdrawal</p>
-          <h1 className="mt-3 text-4xl font-semibold text-white tabular-nums sm:text-5xl">$4,250.00</h1>
-          <p className="mt-2 text-sm text-zinc-400">Your balance is synced and ready for transfer.</p>
+          <h1 className="mt-3 text-4xl font-semibold text-white tabular-nums sm:text-5xl">{formatCurrency(availableForWithdrawal)}</h1>
+          <p className="mt-2 text-sm text-zinc-400">Commission rule: 10% of wholesale value or {formatCurrency(COMMISSION_FLOOR)}, whichever is greater.</p>
           <button className="mt-5 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-200">
             Withdraw Funds
-            <span aria-hidden="true">→</span>
+            <span aria-hidden="true">-&gt;</span>
           </button>
         </div>
 
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5">
-          <h2 className="mb-3 text-lg font-semibold">Earnings over Time</h2>
+          <h2 className="mb-3 text-lg font-semibold">Commission Trend</h2>
           <div className="h-52 rounded-xl border border-zinc-800 bg-zinc-950 p-4">
             <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full">
               <defs>
                 <linearGradient id="area" x1="0" x2="0" y1="0" y2="1">
-                  <stop offset="0%" stopColor="#60a5fa" stopOpacity="0.45" />
-                  <stop offset="100%" stopColor="#60a5fa" stopOpacity="0.04" />
+                  <stop offset="0%" stopColor="#34d399" stopOpacity="0.45" />
+                  <stop offset="100%" stopColor="#34d399" stopOpacity="0.04" />
                 </linearGradient>
               </defs>
               <polygon points={`0,100 ${points} 100,100`} fill="url(#area)" />
-              <polyline points={points} fill="none" stroke="#60a5fa" strokeWidth="2" />
+              <polyline points={points} fill="none" stroke="#34d399" strokeWidth="2" />
             </svg>
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950/80 p-4">
+              <p className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">Pending</p>
+              <p className="mt-2 text-xl font-semibold text-zinc-100">{formatCurrency(pendingCommission)}</p>
+            </div>
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950/80 p-4">
+              <p className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">Average Assignment</p>
+              <p className="mt-2 text-xl font-semibold text-zinc-100">{formatCurrency(averageAssignment)}</p>
+            </div>
           </div>
         </div>
       </section>
 
       <section className="grid gap-4 lg:grid-cols-2">
         <QuotaRing
-          label="Monthly Revenue Goal"
-          progress={74}
-          value="$18,250.00 / $25,000.00"
-          accent="#60a5fa"
+          label="Monthly Commission Goal"
+          progress={commissionProgress}
+          value={`${formatCurrency(totalCommission)} / ${formatCurrency(commissionGoal)}`}
+          accent="#34d399"
           stats={[
-            { label: "Pacing", value: "On Track" },
-            { label: "Required Daily Avg", value: "$450" },
+            { label: "Floor Rule", value: formatCurrency(COMMISSION_FLOOR) },
+            { label: "Commission Rate", value: `${Math.round(COMMISSION_RATE * 100)}%` },
           ]}
         />
 
         <QuotaRing
-          label="Site Deployments Goal"
-          progress={62}
-          value="31 / 50"
-          accent="#34d399"
+          label="Wholesale Volume Goal"
+          progress={volumeProgress}
+          value={`${formatCurrency(totalWholesaleVolume)} / ${formatCurrency(volumeGoal)}`}
+          accent="#60a5fa"
           stats={[
-            { label: "Current Conversion Rate", value: "12%" },
-            { label: "Top Niche", value: "Roofers" },
+            { label: "Deals Closed", value: String(ledger.length) },
+            { label: "Avg Assignment", value: formatCurrency(averageAssignment) },
           ]}
         />
       </section>
 
       <section className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5">
-        <h3 className="mb-3 text-lg font-semibold">Deal Attribution Ledger</h3>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold">Wholesale Commission Ledger</h3>
+            <p className="mt-1 text-sm text-zinc-400">Every row uses the same payout logic: commission = max(10% of wholesale fee, {formatCurrency(COMMISSION_FLOOR)}).</p>
+          </div>
+          <span className="rounded-full border border-zinc-700 px-3 py-1 text-xs uppercase tracking-[0.16em] text-zinc-300">
+            {ledger.length} closed deals
+          </span>
+        </div>
+
         <table className="w-full text-left text-sm">
           <thead className="text-zinc-400">
             <tr className="border-b border-zinc-800">
-              <th className="py-2">Deal</th>
+              <th className="py-2">Property</th>
               <th className="py-2">Date Closed</th>
               <th className="py-2">Status</th>
+              <th className="py-2">Wholesale Value</th>
               <th className="py-2">Commission</th>
-              <th className="py-2">Tier Bonus</th>
+              <th className="py-2">Bonus</th>
             </tr>
           </thead>
           <tbody>
             {ledger.map((item) => (
-              <tr key={item.deal} className="border-b border-zinc-800/70 text-zinc-300 transition hover:bg-zinc-900/50">
-                <td className="py-3">{item.deal}</td>
+              <tr key={`${item.property}-${item.date}`} className="border-b border-zinc-800/70 text-zinc-300 transition hover:bg-zinc-900/50">
+                <td className="py-3">{item.property}</td>
                 <td className="py-3 tabular-nums">{item.date}</td>
                 <td className="py-3">
                   <span
@@ -147,8 +200,9 @@ export default function CommissionsPage() {
                     {item.status}
                   </span>
                 </td>
-                <td className="py-3 font-semibold text-white tabular-nums">{item.commission}</td>
-                <td className="py-3 text-emerald-300 tabular-nums">{item.bonus}</td>
+                <td className="py-3 font-medium text-zinc-200 tabular-nums">{formatCurrency(item.wholesaleValue)}</td>
+                <td className="py-3 font-semibold text-white tabular-nums">{formatCurrency(item.commission)}</td>
+                <td className="py-3 text-emerald-300 tabular-nums">{formatCurrency(item.bonus)}</td>
               </tr>
             ))}
           </tbody>
