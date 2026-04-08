@@ -19,6 +19,11 @@ export async function POST(request: Request) {
       cmaUrl?: string | null;
       cmaFileName?: string | null;
       cmaNote?: string | null;
+      zillowUrl?: string | null;
+      zestimate?: number | null;
+      rentLow?: number | null;
+      rentMedium?: number | null;
+      rentHigh?: number | null;
     };
 
     const leadId = typeof body.leadId === "string" ? body.leadId.trim() : "";
@@ -38,6 +43,11 @@ export async function POST(request: Request) {
       cmaUrl: body.cmaUrl,
       cmaFileName: body.cmaFileName,
       cmaNote: body.cmaNote,
+      zillowUrl: body.zillowUrl,
+      zestimate: body.zestimate,
+      rentLow: body.rentLow,
+      rentMedium: body.rentMedium,
+      rentHigh: body.rentHigh,
     });
 
     return NextResponse.json({ portal });

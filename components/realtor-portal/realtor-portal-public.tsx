@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, CheckCircle2, Clock3, Download, Home, Mail, MapPin, MessageSquareMore, Phone, ShieldCheck } from "lucide-react";
+import { CalendarDays, CheckCircle2, Clock3, Download, ExternalLink, Home, Mail, MapPin, MessageSquareMore, Phone, ShieldCheck } from "lucide-react";
 import type { RealtorPortal } from "@/lib/types";
 
 type RealtorPortalPublicProps = {
@@ -26,6 +26,11 @@ function formatDateTime(value?: string | null) {
     dateStyle: "full",
     timeStyle: "short",
   }).format(parsed);
+}
+
+function formatCurrency(value?: number | null) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "Not set";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
 }
 
 function walkthroughTone(status: RealtorPortal["walkthrough"]["status"]) {
@@ -232,6 +237,25 @@ export function RealtorPortalPublic({ leadId, token }: RealtorPortalPublicProps)
             <p className="mt-2 text-sm text-zinc-400">
               {data.portal.cma.note || "Review the current CMA package attached for this property."}
             </p>
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Zillow Zestimate</p>
+                <p className="mt-2 text-lg font-semibold text-zinc-100">{formatCurrency(data.portal.cma.zestimate)}</p>
+                {data.portal.cma.zillowUrl ? (
+                  <a href={data.portal.cma.zillowUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-2 text-sm text-sky-300 hover:text-sky-200">
+                    Open Zillow
+                    <ExternalLink className="h-4 w-4" />
+                  </a>
+                ) : null}
+              </div>
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Average Rent Band</p>
+                <p className="mt-2 text-sm font-semibold text-zinc-100">
+                  {formatCurrency(data.portal.cma.rentLow)} / {formatCurrency(data.portal.cma.rentMedium)} / {formatCurrency(data.portal.cma.rentHigh)}
+                </p>
+                <p className="mt-2 text-xs text-zinc-500">Low / medium / high monthly rent range.</p>
+              </div>
+            </div>
             {data.portal.cma.url ? (
               <button
                 onClick={async () => {

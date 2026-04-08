@@ -62,6 +62,11 @@ export type RealtorPortal = {
     url: string | null;
     fileName?: string | null;
     note?: string | null;
+    zillowUrl?: string | null;
+    zestimate?: number | null;
+    rentLow?: number | null;
+    rentMedium?: number | null;
+    rentHigh?: number | null;
     sentAt?: string | null;
     viewedAt?: string | null;
   };

@@ -20,6 +20,11 @@ type FormState = {
   cmaUrl: string;
   cmaFileName: string;
   cmaNote: string;
+  zillowUrl: string;
+  zestimate: string;
+  rentLow: string;
+  rentMedium: string;
+  rentHigh: string;
 };
 
 function toLocalDateTimeInput(value?: string | null) {
@@ -49,6 +54,21 @@ function formatDateTime(value?: string | null) {
   }).format(parsed);
 }
 
+function stringifyMoney(value?: number | null) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? String(Math.round(value)) : "";
+}
+
+function parseMoneyInput(value: string) {
+  if (!value.trim()) return null;
+  const numeric = Number(value.replace(/[^0-9.]/g, ""));
+  return Number.isFinite(numeric) && numeric >= 0 ? numeric : null;
+}
+
+function formatCurrency(value?: number | null) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "Not set";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+}
+
 function buildInitialForm(lead: Lead, portal?: RealtorPortal | null): FormState {
   return {
     enabled: portal?.enabled ?? true,
@@ -62,6 +82,11 @@ function buildInitialForm(lead: Lead, portal?: RealtorPortal | null): FormState 
     cmaUrl: portal?.cma.url ?? "",
     cmaFileName: portal?.cma.fileName ?? "",
     cmaNote: portal?.cma.note ?? "",
+    zillowUrl: portal?.cma.zillowUrl ?? "",
+    zestimate: stringifyMoney(portal?.cma.zestimate),
+    rentLow: stringifyMoney(portal?.cma.rentLow),
+    rentMedium: stringifyMoney(portal?.cma.rentMedium),
+    rentHigh: stringifyMoney(portal?.cma.rentHigh),
   };
 }
 
@@ -105,6 +130,11 @@ export function RealtorPortalManager({ leads }: RealtorPortalManagerProps) {
           cmaUrl: "",
           cmaFileName: "",
           cmaNote: "",
+          zillowUrl: "",
+          zestimate: "",
+          rentLow: "",
+          rentMedium: "",
+          rentHigh: "",
         },
   );
 
@@ -121,6 +151,10 @@ export function RealtorPortalManager({ leads }: RealtorPortalManagerProps) {
   const portalLink = selectedLead && selectedPortal?.token ? `${origin}/realtor-portal/${selectedLead.id}?token=${selectedPortal.token}` : "";
   const portalAddress = selectedLead ? leadAddress(selectedLead, selectedPortal) : "";
   const isDemoPackage = selectedLead?.sourceQuery === "realtor_portal_demo";
+  const zestimateValue = parseMoneyInput(form.zestimate);
+  const rentLowValue = parseMoneyInput(form.rentLow);
+  const rentMediumValue = parseMoneyInput(form.rentMedium);
+  const rentHighValue = parseMoneyInput(form.rentHigh);
 
   const leadCards = useMemo(
     () =>
@@ -159,6 +193,11 @@ export function RealtorPortalManager({ leads }: RealtorPortalManagerProps) {
           cmaUrl: form.cmaUrl || null,
           cmaFileName: form.cmaFileName || null,
           cmaNote: form.cmaNote || null,
+          zillowUrl: form.zillowUrl || null,
+          zestimate: zestimateValue,
+          rentLow: rentLowValue,
+          rentMedium: rentMediumValue,
+          rentHigh: rentHighValue,
         }),
       });
 
@@ -418,6 +457,13 @@ export function RealtorPortalManager({ leads }: RealtorPortalManagerProps) {
                   </div>
                 </div>
                 <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Zillow Snapshot</p>
+                  <p className="mt-2 text-sm font-semibold text-zinc-100">{formatCurrency(zestimateValue)}</p>
+                  <p className="mt-1 text-sm text-zinc-400">
+                    Rent band {formatCurrency(rentLowValue)} / {formatCurrency(rentMediumValue)} / {formatCurrency(rentHighValue)}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
                   <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Current agent</p>
                   <p className="mt-2 text-sm font-semibold text-zinc-100">{form.realtorName || "Not assigned"}</p>
                   <p className="mt-1 text-sm text-zinc-400">{form.brokerage || "Brokerage not set"}</p>
@@ -461,6 +507,33 @@ export function RealtorPortalManager({ leads }: RealtorPortalManagerProps) {
                 <label className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
                   <span className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Display File Name</span>
                   <input value={form.cmaFileName} onChange={(event) => setForm((current) => ({ ...current, cmaFileName: event.target.value }))} placeholder="Cedar-Vista-CMA.pdf" className="mt-3 w-full bg-transparent text-sm text-zinc-100 outline-none" />
+                </label>
+                <label className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4 md:col-span-2">
+                  <span className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Zillow Property URL</span>
+                  <input value={form.zillowUrl} onChange={(event) => setForm((current) => ({ ...current, zillowUrl: event.target.value }))} placeholder="https://www.zillow.com/homedetails/..." className="mt-3 w-full bg-transparent text-sm text-zinc-100 outline-none" />
+                </label>
+                <label className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
+                  <span className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Zestimate</span>
+                  <input value={form.zestimate} onChange={(event) => setForm((current) => ({ ...current, zestimate: event.target.value }))} placeholder="314800" className="mt-3 w-full bg-transparent text-sm text-zinc-100 outline-none" />
+                </label>
+                <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
+                  <span className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Rent Band Preview</span>
+                  <p className="mt-3 text-sm font-semibold text-zinc-100">
+                    {formatCurrency(rentLowValue)} / {formatCurrency(rentMediumValue)} / {formatCurrency(rentHighValue)}
+                  </p>
+                  <p className="mt-2 text-xs text-zinc-500">Low / medium / high monthly rent scenario.</p>
+                </div>
+                <label className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
+                  <span className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Rent Low</span>
+                  <input value={form.rentLow} onChange={(event) => setForm((current) => ({ ...current, rentLow: event.target.value }))} placeholder="2050" className="mt-3 w-full bg-transparent text-sm text-zinc-100 outline-none" />
+                </label>
+                <label className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
+                  <span className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Rent Medium</span>
+                  <input value={form.rentMedium} onChange={(event) => setForm((current) => ({ ...current, rentMedium: event.target.value }))} placeholder="2275" className="mt-3 w-full bg-transparent text-sm text-zinc-100 outline-none" />
+                </label>
+                <label className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
+                  <span className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Rent High</span>
+                  <input value={form.rentHigh} onChange={(event) => setForm((current) => ({ ...current, rentHigh: event.target.value }))} placeholder="2490" className="mt-3 w-full bg-transparent text-sm text-zinc-100 outline-none" />
                 </label>
                 <label className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4 md:col-span-2">
                   <span className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">CMA Summary</span>

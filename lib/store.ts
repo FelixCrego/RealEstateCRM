@@ -59,6 +59,11 @@ export type SaveRealtorPortalInput = {
   cmaUrl?: string | null;
   cmaFileName?: string | null;
   cmaNote?: string | null;
+  zillowUrl?: string | null;
+  zestimate?: number | null;
+  rentLow?: number | null;
+  rentMedium?: number | null;
+  rentHigh?: number | null;
 };
 
 function stringOrEmpty(value: unknown) {
@@ -72,6 +77,15 @@ function stringOrNull(value: unknown) {
 
 function stringArray(value: unknown) {
   return Array.isArray(value) ? value.map((item) => String(item).trim()).filter(Boolean) : [];
+}
+
+function numberOrNull(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const numeric = Number(value.replace(/[^0-9.-]/g, ""));
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+  return null;
 }
 
 function normalizeInvestorLeadProfile(value: unknown): InvestorLeadProfile | null {
@@ -153,6 +167,11 @@ function normalizeRealtorPortal(value: unknown): RealtorPortal | null {
       url: stringOrNull(cmaInput.url),
       fileName: stringOrNull(cmaInput.fileName),
       note: stringOrNull(cmaInput.note),
+      zillowUrl: stringOrNull(cmaInput.zillowUrl),
+      zestimate: numberOrNull(cmaInput.zestimate),
+      rentLow: numberOrNull(cmaInput.rentLow),
+      rentMedium: numberOrNull(cmaInput.rentMedium),
+      rentHigh: numberOrNull(cmaInput.rentHigh),
       sentAt: stringOrNull(cmaInput.sentAt),
       viewedAt: stringOrNull(cmaInput.viewedAt),
     },
@@ -670,6 +689,11 @@ function buildRealtorPortalDemoSourcePayload() {
         url: "/demo/realtor-portal-cma.html",
         fileName: "Cedar-Vista-CMA.html",
         note: "Broker price opinion and comp package prepared for investor review. Focus on as-is value, repair sensitivity, and list-vs-dispo range.",
+        zillowUrl: "https://www.zillow.com/homes/2147-E-Cedar-Vista-Dr-Phoenix,-AZ-85032_rb/",
+        zestimate: 314800,
+        rentLow: 2050,
+        rentMedium: 2275,
+        rentHigh: 2490,
         sentAt: new Date().toISOString(),
         viewedAt: null,
       },
@@ -1434,6 +1458,11 @@ function buildDefaultRealtorPortal(lead: Lead, existing: RealtorPortal | null = 
       url: existing?.cma.url ?? null,
       fileName: existing?.cma.fileName ?? null,
       note: existing?.cma.note ?? null,
+      zillowUrl: existing?.cma.zillowUrl ?? null,
+      zestimate: existing?.cma.zestimate ?? null,
+      rentLow: existing?.cma.rentLow ?? null,
+      rentMedium: existing?.cma.rentMedium ?? null,
+      rentHigh: existing?.cma.rentHigh ?? null,
       sentAt: existing?.cma.sentAt ?? null,
       viewedAt: existing?.cma.viewedAt ?? null,
     },
@@ -1479,6 +1508,11 @@ export async function saveLeadRealtorPortal(ownerId: string | null, leadId: stri
       url: nextCmaUrl ?? null,
       fileName: input.cmaFileName === undefined ? currentPortal.cma.fileName : stringOrNull(input.cmaFileName),
       note: input.cmaNote === undefined ? currentPortal.cma.note : stringOrNull(input.cmaNote),
+      zillowUrl: input.zillowUrl === undefined ? currentPortal.cma.zillowUrl : stringOrNull(input.zillowUrl),
+      zestimate: input.zestimate === undefined ? currentPortal.cma.zestimate : input.zestimate ?? null,
+      rentLow: input.rentLow === undefined ? currentPortal.cma.rentLow : input.rentLow ?? null,
+      rentMedium: input.rentMedium === undefined ? currentPortal.cma.rentMedium : input.rentMedium ?? null,
+      rentHigh: input.rentHigh === undefined ? currentPortal.cma.rentHigh : input.rentHigh ?? null,
       sentAt: cmaUrlChanged && nextCmaUrl ? now : currentPortal.cma.sentAt,
       viewedAt: cmaUrlChanged ? null : currentPortal.cma.viewedAt,
     },
