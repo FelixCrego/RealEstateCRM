@@ -3,6 +3,7 @@ import { cookies, headers } from "next/headers";
 export const AUTH_ACCESS_TOKEN_COOKIE = "felix_access_token";
 export const AUTH_REFRESH_TOKEN_COOKIE = "felix_refresh_token";
 export const AUTH_USER_HEADER = "x-felix-user-id";
+export const AUTH_USER_EMAIL_HEADER = "x-felix-user-email";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -137,6 +138,7 @@ export async function refreshSupabaseSession(refreshToken: string) {
 
   return {
     userId: payload.user.id,
+    email: payload.user.email ?? null,
     accessToken: payload.access_token,
     refreshToken: payload.refresh_token,
     expiresIn: payload.expires_in,
@@ -166,6 +168,14 @@ export async function getAuthenticatedUserId() {
 }
 
 export async function getAuthenticatedUser() {
+  const forwardedUserId = headers().get(AUTH_USER_HEADER);
+  if (forwardedUserId) {
+    return {
+      id: forwardedUserId,
+      email: headers().get(AUTH_USER_EMAIL_HEADER) ?? null,
+    };
+  }
+
   const accessToken = cookies().get(AUTH_ACCESS_TOKEN_COOKIE)?.value ?? "";
   if (!accessToken) return null;
 

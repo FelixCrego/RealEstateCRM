@@ -4,12 +4,13 @@ import {
   AUTH_ACCESS_TOKEN_COOKIE,
   AUTH_REFRESH_TOKEN_COOKIE,
   AUTH_USER_HEADER,
+  AUTH_USER_EMAIL_HEADER,
   getSupabaseUserByAccessToken,
   refreshSupabaseSession,
 } from "@/lib/auth";
 
 const PUBLIC_PATHS = ["/login", "/signup", "/api/auth/login", "/api/auth/signup"];
-const AUTH_BYPASS_ENABLED = true;
+const AUTH_BYPASS_ENABLED = process.env.NODE_ENV !== "production";
 
 function isPublicPath(pathname: string) {
   return PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
@@ -45,6 +46,7 @@ export async function middleware(request: NextRequest) {
   if (user?.id) {
     const requestHeaders = new Headers(request.headers);
     requestHeaders.set(AUTH_USER_HEADER, user.id);
+    if (user.email) requestHeaders.set(AUTH_USER_EMAIL_HEADER, user.email);
     return NextResponse.next({ request: { headers: requestHeaders } });
   }
 
@@ -56,6 +58,7 @@ export async function middleware(request: NextRequest) {
     const refreshed = await refreshSupabaseSession(refreshToken);
     const requestHeaders = new Headers(request.headers);
     requestHeaders.set(AUTH_USER_HEADER, refreshed.userId);
+    if (refreshed.email) requestHeaders.set(AUTH_USER_EMAIL_HEADER, refreshed.email);
 
     const response = NextResponse.next({ request: { headers: requestHeaders } });
     response.cookies.set(AUTH_ACCESS_TOKEN_COOKIE, refreshed.accessToken, {
