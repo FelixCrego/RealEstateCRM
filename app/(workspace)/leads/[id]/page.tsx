@@ -7,6 +7,56 @@ import { useAmazonConnect } from "@/components/amazon-connect-provider";
 import { createClientComponentClient } from "@/lib/supabase-client";
 import FollowUpEngine from "./FollowUpEngine";
 
+type RealEstateLeadType = "OFF_MARKET" | "FSBO" | "PROBATE" | "PRE_FORECLOSURE" | "VACANT" | "REALTOR" | "LAND" | "MULTIFAMILY" | "UNKNOWN";
+type OccupancyStatus = "VACANT" | "OWNER_OCCUPIED" | "TENANT_OCCUPIED" | "UNKNOWN";
+type ConditionStatus = "LIGHT" | "MODERATE" | "HEAVY" | "FULL_GUT";
+type SellerTimeline = "ASAP" | "30_DAYS" | "60_90_DAYS" | "FLEXIBLE";
+type DealStrategy = "WHOLESALE" | "FLIP" | "BUY_HOLD" | "NOVATION" | "CREATIVE_FINANCE";
+
+type RealEstateProfileDraft = {
+  propertyAddress: string;
+  leadType: RealEstateLeadType;
+  askingPrice: string;
+  arv: string;
+  rehabBudget: string;
+  rentEstimate: string;
+  hoaMonthly: string;
+  taxesAnnual: string;
+  insuranceAnnual: string;
+  assignmentFee: string;
+  desiredProfit: string;
+  lastOffer: string;
+  sellerMotivation: string;
+  occupancy: OccupancyStatus;
+  condition: ConditionStatus;
+  timeline: SellerTimeline;
+  strategy: DealStrategy;
+  painPoints: string[];
+  notes: string;
+};
+
+type LeadSourcePayload = {
+  aiResearchSummary?: string | null;
+  contacts?: LeadContactRecord[];
+  templateBranding?: {
+    logoUrl?: string;
+    heroImageUrl?: string;
+    primaryColor?: string;
+    secondaryColor?: string;
+  };
+  demoBooking?: {
+    date?: string;
+    time?: string;
+    timeZone?: string;
+    meetLink?: string;
+    bookedAt?: string;
+  };
+  realtorPortal?: {
+    propertyAddress?: string | null;
+  } | null;
+  realEstateProfile?: Partial<RealEstateProfileDraft> | null;
+};
+
 type LeadRecord = {
   id: string;
   business_name?: string | null;
@@ -26,40 +76,8 @@ type LeadRecord = {
   siteStatus?: "UNBUILT" | "BUILDING" | "LIVE" | "FAILED" | null;
   vercel_deployment_id?: string | null;
   vercelDeploymentId?: string | null;
-  source_payload?: {
-    aiResearchSummary?: string | null;
-    contacts?: LeadContactRecord[];
-    templateBranding?: {
-      logoUrl?: string;
-      heroImageUrl?: string;
-      primaryColor?: string;
-      secondaryColor?: string;
-    };
-    demoBooking?: {
-      date?: string;
-      time?: string;
-      timeZone?: string;
-      meetLink?: string;
-      bookedAt?: string;
-    };
-  } | null;
-  sourcePayload?: {
-    aiResearchSummary?: string | null;
-    contacts?: LeadContactRecord[];
-    templateBranding?: {
-      logoUrl?: string;
-      heroImageUrl?: string;
-      primaryColor?: string;
-      secondaryColor?: string;
-    };
-    demoBooking?: {
-      date?: string;
-      time?: string;
-      timeZone?: string;
-      meetLink?: string;
-      bookedAt?: string;
-    };
-  } | null;
+  source_payload?: LeadSourcePayload | null;
+  sourcePayload?: LeadSourcePayload | null;
   aiResearchSummary?: string | null;
   contacts?: LeadContactRecord[];
 };
@@ -111,7 +129,8 @@ type CompletedFollowUpTask = {
 type FetchStatus = "loading" | "ready" | "error";
 type ActivityTab = "Notes" | "SMS" | "Email" | "Call Audio & AI";
 type ScriptTab = "Scripts" | "Objections";
-type ExecutionLeadStatus = "New" | "Pitched" | "Demo Booked" | "Awaiting Approval" | "Payment Pending" | "Closed Won";
+type ExecutionLeadStatus = "New" | "Pitched" | "Walkthrough Set" | "Offer Sent" | "Under Review" | "Closed Won";
+const EXECUTION_STATUS_OPTIONS: ExecutionLeadStatus[] = ["New", "Pitched", "Walkthrough Set", "Offer Sent", "Under Review", "Closed Won"];
 
 
 
@@ -149,6 +168,19 @@ type CallIntelRecord = {
   interruptions?: number | string | null;
   transcript_json?: CallIntelTranscriptLine[] | null;
 };
+
+const REAL_ESTATE_PAIN_POINT_OPTIONS = [
+  "Needs repairs",
+  "Inherited property",
+  "Vacant house",
+  "Tired landlord",
+  "Facing foreclosure",
+  "Behind on taxes",
+  "Needs quick close",
+  "Problem tenants",
+  "Out-of-state owner",
+  "Too many listings with no sale",
+] as const;
 
 const PHONE_AREA_CODE_TIMEZONES: Record<string, { timeZone: string; location: string }> = {
   "206": { timeZone: "America/Los_Angeles", location: "Seattle, WA" },
@@ -234,6 +266,101 @@ const FALLBACK_LEAD: LeadRecord = {
   email: "No email on file",
   deployed_url: "",
 };
+
+const currencyFormatter = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 0,
+});
+
+function toRecord(value: unknown) {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
+function toStringValue(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+function toStringArray(value: unknown) {
+  return Array.isArray(value) ? value.map((item) => String(item).trim()).filter(Boolean) : [];
+}
+
+function parseCurrencyInput(value: string) {
+  const normalized = value.replace(/[^0-9.-]/g, "");
+  if (!normalized) return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatCurrency(value: number | null) {
+  return value === null || !Number.isFinite(value) ? "Not enough data" : currencyFormatter.format(value);
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function normalizeRealEstateProfile(leadRecord: LeadRecord | null): RealEstateProfileDraft {
+  const sourcePayload = toRecord(leadRecord?.source_payload ?? leadRecord?.sourcePayload);
+  const stored = toRecord(sourcePayload.realEstateProfile);
+  const realtorPortal = toRecord(sourcePayload.realtorPortal);
+  const fallbackAddress =
+    toStringValue(stored.propertyAddress) ||
+    toStringValue(realtorPortal.propertyAddress) ||
+    toStringValue(leadRecord?.business_name) ||
+    toStringValue(leadRecord?.businessName) ||
+    "";
+
+  return {
+    propertyAddress: fallbackAddress,
+    leadType: (toStringValue(stored.leadType) as RealEstateLeadType) || "OFF_MARKET",
+    askingPrice: toStringValue(stored.askingPrice),
+    arv: toStringValue(stored.arv),
+    rehabBudget: toStringValue(stored.rehabBudget),
+    rentEstimate: toStringValue(stored.rentEstimate),
+    hoaMonthly: toStringValue(stored.hoaMonthly),
+    taxesAnnual: toStringValue(stored.taxesAnnual),
+    insuranceAnnual: toStringValue(stored.insuranceAnnual),
+    assignmentFee: toStringValue(stored.assignmentFee) || "15000",
+    desiredProfit: toStringValue(stored.desiredProfit) || "40000",
+    lastOffer: toStringValue(stored.lastOffer),
+    sellerMotivation: toStringValue(stored.sellerMotivation) || "5",
+    occupancy: (toStringValue(stored.occupancy) as OccupancyStatus) || "UNKNOWN",
+    condition: (toStringValue(stored.condition) as ConditionStatus) || "MODERATE",
+    timeline: (toStringValue(stored.timeline) as SellerTimeline) || "30_DAYS",
+    strategy: (toStringValue(stored.strategy) as DealStrategy) || "WHOLESALE",
+    painPoints: toStringArray(stored.painPoints),
+    notes: toStringValue(stored.notes),
+  };
+}
+
+function buildDealSummary(
+  leadName: string,
+  leadCity: string,
+  profile: RealEstateProfileDraft,
+  recommendedStrategy: DealStrategy,
+  opportunityScore: number,
+  maoValue: number | null,
+  flipProfitValue: number | null,
+  buyHoldMarginValue: number | null,
+) {
+  return [
+    `Lead: ${leadName}${leadCity ? ` (${leadCity})` : ""}`,
+    `Property: ${profile.propertyAddress || "No property address entered"}`,
+    `Lead type: ${profile.leadType.replaceAll("_", " ")}`,
+    `Recommended strategy: ${recommendedStrategy.replaceAll("_", " ")}`,
+    `Opportunity score: ${opportunityScore}/100`,
+    `Asking: ${formatCurrency(parseCurrencyInput(profile.askingPrice))}`,
+    `ARV: ${formatCurrency(parseCurrencyInput(profile.arv))}`,
+    `Rehab: ${formatCurrency(parseCurrencyInput(profile.rehabBudget))}`,
+    `Cash offer ceiling: ${formatCurrency(maoValue)}`,
+    `Estimated flip spread: ${formatCurrency(flipProfitValue)}`,
+    `Estimated rental margin: ${buyHoldMarginValue === null ? "Not enough data" : `${currencyFormatter.format(buyHoldMarginValue)}/mo`}`,
+    `Seller motivation: ${profile.sellerMotivation || "n/a"}/10`,
+    profile.painPoints.length ? `Pain points: ${profile.painPoints.join(", ")}` : "Pain points: none tagged yet",
+    profile.notes.trim() ? `Notes: ${profile.notes.trim()}` : "",
+  ].filter(Boolean).join("\n");
+}
 
 function normalizeLeadContacts(leadRecord: LeadRecord | null): LeadContactRecord[] {
   const payloadContacts = leadRecord?.source_payload?.contacts ?? leadRecord?.sourcePayload?.contacts ?? leadRecord?.contacts;
@@ -325,16 +452,19 @@ export default function LeadExecutionPage() {
   const [researchLoading, setResearchLoading] = useState(false);
   const [researchInsight, setResearchInsight] = useState<string>("");
   const [researchError, setResearchError] = useState<string>("");
-  const [deployLoading, setDeployLoading] = useState(false);
-  const [deployError, setDeployError] = useState("");
-  const [deployProgress, setDeployProgress] = useState(0);
-  const [deployStageLabel, setDeployStageLabel] = useState("");
-  const [deployStartedAt, setDeployStartedAt] = useState<number | null>(null);
+  const [realEstateProfile, setRealEstateProfile] = useState<RealEstateProfileDraft>(() => normalizeRealEstateProfile(null));
+  const [realEstateSaving, setRealEstateSaving] = useState(false);
+  const [realEstateError, setRealEstateError] = useState("");
+  const [realEstateSaveMessage, setRealEstateSaveMessage] = useState("");
+  const [selectedTemplateId, setSelectedTemplateId] = useState<"garage-door" | "new-template">("garage-door");
   const [brandingLogoUrl, setBrandingLogoUrl] = useState("");
   const [brandingHeroImageUrl, setBrandingHeroImageUrl] = useState("");
-  const [brandingPrimaryColor, setBrandingPrimaryColor] = useState("#0f172a");
-  const [brandingSecondaryColor, setBrandingSecondaryColor] = useState("#2563eb");
-  const [selectedTemplateId, setSelectedTemplateId] = useState<"garage-door" | "new-template">("garage-door");
+  const [brandingPrimaryColor, setBrandingPrimaryColor] = useState("#10b981");
+  const [brandingSecondaryColor, setBrandingSecondaryColor] = useState("#111827");
+  const [checkoutAmount, setCheckoutAmount] = useState(0);
+  const [approvalPending, setApprovalPending] = useState(false);
+  const [checkoutLink, setCheckoutLink] = useState("");
+  const [checkoutLinkCopied, setCheckoutLinkCopied] = useState(false);
 
   const [activeTab, setActiveTab] = useState<ActivityTab>("Notes");
   const [callIntel, setCallIntel] = useState<CallIntelRecord | null>(null);
@@ -372,11 +502,6 @@ export default function LeadExecutionPage() {
   const [inviteCopied, setInviteCopied] = useState(false);
 
   const [leadExecutionStatus, setLeadExecutionStatus] = useState<ExecutionLeadStatus>("New");
-  const [checkoutAmount, setCheckoutAmount] = useState(500);
-  const [checkoutLoading, setCheckoutLoading] = useState(false);
-  const [checkoutLink, setCheckoutLink] = useState("");
-  const [checkoutLinkCopied, setCheckoutLinkCopied] = useState(false);
-  const [approvalPending, setApprovalPending] = useState(false);
   const [closingDeal, setClosingDeal] = useState(false);
   const [closeDealError, setCloseDealError] = useState("");
   const [playbookLoading, setPlaybookLoading] = useState(false);
@@ -385,6 +510,14 @@ export default function LeadExecutionPage() {
   const [notesError, setNotesError] = useState("");
   const [notesDraft, setNotesDraft] = useState("");
   const [isDrafting, setIsDrafting] = useState(false);
+  const deployLoading = false;
+  const siteStatus: LeadRecord["siteStatus"] = null;
+  const deployedUrl = "";
+  const deployStageLabel = "";
+  const deployProgress = 0;
+  const deployEtaLabel = "";
+  const deployError = "";
+  const checkoutLoading = false;
   const [notes, setNotes] = useState<LeadNoteRecord[]>([]);
   const [tasks, setTasks] = useState<LeadTaskRecord[]>([]);
   const [tasksLoading, setTasksLoading] = useState(false);
@@ -441,21 +574,42 @@ export default function LeadExecutionPage() {
           return;
         }
 
-        const response = await fetch("/api/leads", {
-          method: "GET",
-          headers: { Accept: "application/json" },
-          cache: "no-store",
-        });
+        let data: LeadRecord | null = null;
 
-        const payload = (await response.json().catch(() => null)) as { leads?: LeadRecord[]; error?: string } | null;
+        try {
+          const response = await fetch("/api/leads", {
+            method: "GET",
+            headers: { Accept: "application/json" },
+            cache: "no-store",
+          });
 
-        if (!response.ok) {
-          throw new Error(payload?.error || "Unable to load lead.");
+          const payload = (await response.json().catch(() => null)) as { leads?: LeadRecord[]; error?: string } | null;
+
+          if (response.ok) {
+            const leadList = Array.isArray(payload?.leads) ? payload.leads : [];
+            setOrderedLeadIds(leadList.map((candidate) => candidate.id).filter(Boolean));
+            data = leadList.find((candidate) => candidate?.id === leadId) ?? null;
+          }
+        } catch {
+          // Fall through to the direct Supabase lookup below.
         }
 
-        const leadList = Array.isArray(payload?.leads) ? payload.leads : [];
-        setOrderedLeadIds(leadList.map((candidate) => candidate.id).filter(Boolean));
-        const data = leadList.find((candidate) => candidate?.id === leadId) ?? null;
+        if (!data) {
+          const { data: directLead, error: directLeadError } = await supabase
+            .from<LeadRecord>("leads")
+            .select("*")
+            .eq("id", leadId)
+            .single();
+
+          if (directLeadError && directLeadError.code !== "PGRST116") {
+            throw new Error(directLeadError.message || "Unable to load lead.");
+          }
+
+          if (directLead) {
+            data = directLead;
+            setOrderedLeadIds([directLead.id]);
+          }
+        }
 
         if (!alive) return;
 
@@ -471,18 +625,15 @@ export default function LeadExecutionPage() {
           if (existingDemoBooking?.time) setSelectedMeetingTime(existingDemoBooking.time);
           if (existingDemoBooking?.meetLink) setMeetingLink(existingDemoBooking.meetLink);
 
-          const resolvedStatus = data.status as ExecutionLeadStatus | undefined;
-          if (
-            resolvedStatus === "New" ||
-            resolvedStatus === "Pitched" ||
-            resolvedStatus === "Demo Booked" ||
-            resolvedStatus === "Awaiting Approval" ||
-            resolvedStatus === "Payment Pending" ||
-            resolvedStatus === "Closed Won"
-          ) {
-            setLeadExecutionStatus(resolvedStatus);
+          const resolvedStatus = data.status || "";
+          if (resolvedStatus === "New" || resolvedStatus === "Pitched" || resolvedStatus === "Walkthrough Set" || resolvedStatus === "Offer Sent" || resolvedStatus === "Under Review" || resolvedStatus === "Closed Won") {
+            setLeadExecutionStatus(resolvedStatus as ExecutionLeadStatus);
+          } else if (resolvedStatus === "Demo Booked") {
+            setLeadExecutionStatus("Walkthrough Set");
+          } else if (resolvedStatus === "Awaiting Approval" || resolvedStatus === "Payment Pending") {
+            setLeadExecutionStatus("Under Review");
           } else if (hasBookedDemo(data)) {
-            setLeadExecutionStatus("Demo Booked");
+            setLeadExecutionStatus("Walkthrough Set");
           }
 
           setStatus("ready");
@@ -505,131 +656,9 @@ export default function LeadExecutionPage() {
     return () => {
       alive = false;
     };
-  }, [leadId]);
+  }, [leadId, supabase]);
 
 
-
-  useEffect(() => {
-    if (!leadId) return;
-    const currentStatus = lead?.site_status || lead?.siteStatus;
-    if (currentStatus !== "BUILDING") return;
-
-    let active = true;
-    const startedAt = deployStartedAt ?? Date.now();
-    if (!deployStartedAt) setDeployStartedAt(startedAt);
-
-    const maxPollingWindowMs = 10 * 60 * 1000;
-
-    async function pollDeploymentStatus() {
-      if (typeof document !== "undefined" && document.hidden) {
-        return;
-      }
-
-      if (Date.now() - startedAt > maxPollingWindowMs) {
-        if (!active) return;
-        setDeployError("Deployment status polling timed out. Refresh to check the latest status.");
-        setDeployStageLabel("Build status stale. Refresh to continue tracking.");
-        return;
-      }
-
-      try {
-        const response = await fetch(`/api/deploy/status?leadId=${encodeURIComponent(leadId)}`, { cache: "no-store" });
-        const payload = (await response.json().catch(() => null)) as { siteStatus?: string; deployedUrl?: string | null; readyState?: string; error?: string } | null;
-
-        if (!response.ok) {
-          throw new Error(payload?.error || "Unable to fetch deployment status.");
-        }
-
-        const nextStatus = payload?.siteStatus;
-        const nextUrl = payload?.deployedUrl || undefined;
-
-        if (!active) return;
-
-        if (nextStatus === "LIVE") {
-          setDeployProgress(100);
-          setDeployStageLabel("Build complete. Live site is ready.");
-          setDeployStartedAt(null);
-          setDeployError("");
-          setLead((previous) =>
-            previous
-              ? {
-                  ...previous,
-                  site_status: "LIVE",
-                  siteStatus: "LIVE",
-                  deployed_url: nextUrl || previous.deployed_url || previous.deployedUrl || "",
-                  deployedUrl: nextUrl || previous.deployedUrl || previous.deployed_url || "",
-                }
-              : previous,
-          );
-          return;
-        }
-
-        if (nextStatus === "FAILED") {
-          setDeployProgress(100);
-          setDeployStageLabel("Build failed.");
-          setDeployStartedAt(null);
-          setLead((previous) =>
-            previous
-              ? {
-                  ...previous,
-                  site_status: "FAILED",
-                  siteStatus: "FAILED",
-                }
-              : previous,
-          );
-          setDeployError("Vercel reported a failed deployment. Please retry.");
-          return;
-        }
-
-        const readyState = payload?.readyState || "BUILDING";
-        const elapsedSeconds = Math.floor((Date.now() - startedAt) / 1000);
-
-        if (elapsedSeconds >= 180 && nextUrl) {
-          setDeployProgress(100);
-          setDeployStageLabel("Build window elapsed. Live link is ready to open.");
-          setDeployStartedAt(null);
-          setDeployError("");
-          setLead((previous) =>
-            previous
-              ? {
-                  ...previous,
-                  site_status: "LIVE",
-                  siteStatus: "LIVE",
-                  deployed_url: nextUrl || previous.deployed_url || previous.deployedUrl || "",
-                  deployedUrl: nextUrl || previous.deployedUrl || previous.deployed_url || "",
-                }
-              : previous,
-          );
-          return;
-        }
-
-        const estimatedByState: Record<string, number> = {
-          QUEUED: 15,
-          INITIALIZING: 28,
-          BUILDING: 55,
-          DEPLOYING: 78,
-        };
-        const elapsedProgress = Math.min(Math.floor((elapsedSeconds / 180) * 100), 90);
-        const stateProgress = estimatedByState[readyState] ?? 45;
-        setDeployProgress((previous) => Math.min(Math.max(previous, stateProgress, elapsedProgress), 95));
-        setDeployStageLabel(readyState === "QUEUED" ? "Queued in build pipeline..." : `Building (${readyState})...`);
-      } catch (error) {
-        if (!active) return;
-        setDeployError(error instanceof Error ? error.message : "Unable to fetch deployment status.");
-      }
-    }
-
-    const interval = window.setInterval(() => {
-      void pollDeploymentStatus();
-    }, 15000);
-
-    void pollDeploymentStatus();
-
-    return () => {
-      active = false;
-      window.clearInterval(interval);
-    };
-  }, [deployStartedAt, lead?.site_status, lead?.siteStatus, leadId]);
 
   useEffect(() => {
     if (activeTab !== "Call Audio & AI" || !leadId) return;
@@ -765,7 +794,7 @@ export default function LeadExecutionPage() {
   const leadName = lead?.business_name || lead?.businessName || "Unknown Business";
   const leadPhone = lead?.phone || "No phone on file";
   const leadDemoBooking = lead?.source_payload?.demoBooking ?? lead?.sourcePayload?.demoBooking;
-  const isDemoBooked = hasBookedDemo(lead) || leadExecutionStatus === "Demo Booked";
+  const isDemoBooked = hasBookedDemo(lead) || leadExecutionStatus === "Walkthrough Set";
   const leadWebsite = lead?.website || lead?.website_url || lead?.websiteUrl || "No website on file";
   const hasLeadWebsite = leadWebsite !== "No website on file";
   const leadWebsiteHref = leadWebsite.startsWith("http://") || leadWebsite.startsWith("https://") ? leadWebsite : `https://${leadWebsite}`;
@@ -773,42 +802,116 @@ export default function LeadExecutionPage() {
   useEffect(() => {
     setDialNumber(lead?.phone || "");
   }, [lead?.phone]);
-  const deployedUrl = lead?.deployed_url || lead?.deployedUrl || "";
-  const siteStatus = lead?.site_status || lead?.siteStatus || "UNBUILT";
-  const deployEtaLabel = useMemo(() => {
-    if (siteStatus !== "BUILDING" || !deployStartedAt) return "";
-    const elapsedSeconds = Math.floor((Date.now() - deployStartedAt) / 1000);
-    const estimatedTotalSeconds = 180;
-    const remaining = Math.max(estimatedTotalSeconds - elapsedSeconds, 0);
-    const minutes = Math.floor(remaining / 60);
-    const seconds = remaining % 60;
-    return `${minutes}:${String(seconds).padStart(2, "0")} remaining (est.)`;
-  }, [deployStartedAt, siteStatus]);
   const leadCity = lead?.city || "Unknown city";
 
   useEffect(() => {
-    const sourcePayload = lead?.source_payload ?? lead?.sourcePayload;
-    const branding = sourcePayload?.templateBranding;
-    setBrandingLogoUrl(branding?.logoUrl || "");
-    setBrandingHeroImageUrl(branding?.heroImageUrl || "");
-    setBrandingPrimaryColor(branding?.primaryColor || "#0f172a");
-    setBrandingSecondaryColor(branding?.secondaryColor || "#2563eb");
-  }, [lead?.id, lead?.sourcePayload, lead?.source_payload]);
+    setRealEstateProfile(normalizeRealEstateProfile(lead));
+  }, [lead]);
+
+  const askingPriceValue = parseCurrencyInput(realEstateProfile.askingPrice);
+  const arvValue = parseCurrencyInput(realEstateProfile.arv);
+  const rehabBudgetValue = parseCurrencyInput(realEstateProfile.rehabBudget) ?? 0;
+  const rentEstimateValue = parseCurrencyInput(realEstateProfile.rentEstimate);
+  const hoaMonthlyValue = parseCurrencyInput(realEstateProfile.hoaMonthly) ?? 0;
+  const taxesAnnualValue = parseCurrencyInput(realEstateProfile.taxesAnnual) ?? 0;
+  const insuranceAnnualValue = parseCurrencyInput(realEstateProfile.insuranceAnnual) ?? 0;
+  const assignmentFeeValue = parseCurrencyInput(realEstateProfile.assignmentFee) ?? 15000;
+  const desiredProfitValue = parseCurrencyInput(realEstateProfile.desiredProfit) ?? 40000;
+  const lastOfferValue = parseCurrencyInput(realEstateProfile.lastOffer);
+  const sellerMotivationValue = clamp(Number(realEstateProfile.sellerMotivation || 5) || 5, 1, 10);
+  const monthlyCarryValue = hoaMonthlyValue + taxesAnnualValue / 12 + insuranceAnnualValue / 12;
+  const buyHoldMarginValue = rentEstimateValue === null ? null : rentEstimateValue - monthlyCarryValue;
+  const deepDiscountPercent = askingPriceValue !== null && arvValue !== null && arvValue > 0 ? askingPriceValue / arvValue : null;
+  const maoValue = arvValue === null ? null : Math.round(arvValue * 0.7 - rehabBudgetValue - assignmentFeeValue);
+  const flipProfitValue = arvValue === null || askingPriceValue === null ? null : Math.round(arvValue - askingPriceValue - rehabBudgetValue - desiredProfitValue);
+
+  const opportunityScore = useMemo(() => {
+    let score = sellerMotivationValue * 4;
+    if (realEstateProfile.occupancy === "VACANT") score += 14;
+    if (realEstateProfile.condition === "HEAVY") score += 10;
+    if (realEstateProfile.condition === "FULL_GUT") score += 14;
+    if (realEstateProfile.timeline === "ASAP") score += 12;
+    if (realEstateProfile.timeline === "30_DAYS") score += 7;
+    if (deepDiscountPercent !== null) {
+      if (deepDiscountPercent <= 0.65) score += 28;
+      else if (deepDiscountPercent <= 0.75) score += 18;
+      else if (deepDiscountPercent <= 0.85) score += 8;
+    }
+    score += Math.min(realEstateProfile.painPoints.length * 4, 16);
+    return clamp(Math.round(score), 5, 100);
+  }, [deepDiscountPercent, realEstateProfile.condition, realEstateProfile.occupancy, realEstateProfile.painPoints.length, realEstateProfile.timeline, sellerMotivationValue]);
+
+  const recommendedStrategy = useMemo<DealStrategy>(() => {
+    if (buyHoldMarginValue !== null && buyHoldMarginValue > 900 && rehabBudgetValue <= 35000) return "BUY_HOLD";
+    if (deepDiscountPercent !== null && deepDiscountPercent <= 0.72 && realEstateProfile.occupancy !== "OWNER_OCCUPIED") return "WHOLESALE";
+    if (flipProfitValue !== null && flipProfitValue > 35000) return "FLIP";
+    if (sellerMotivationValue >= 8 && realEstateProfile.timeline !== "ASAP") return "CREATIVE_FINANCE";
+    if (askingPriceValue !== null && arvValue !== null && askingPriceValue >= arvValue * 0.85) return "NOVATION";
+    return realEstateProfile.strategy;
+  }, [arvValue, askingPriceValue, buyHoldMarginValue, deepDiscountPercent, flipProfitValue, realEstateProfile.occupancy, realEstateProfile.strategy, realEstateProfile.timeline, rehabBudgetValue, sellerMotivationValue]);
+
+  const riskFlags = useMemo(() => {
+    const flags: string[] = [];
+    if (!realEstateProfile.propertyAddress.trim()) flags.push("Missing property address");
+    if (askingPriceValue === null) flags.push("No asking price entered");
+    if (arvValue === null) flags.push("ARV not validated");
+    if (!realEstateProfile.painPoints.length) flags.push("Seller pain points not tagged");
+    if (sellerMotivationValue <= 4) flags.push("Low current motivation");
+    if (realEstateProfile.occupancy === "TENANT_OCCUPIED") flags.push("Tenant occupancy may slow access and closing");
+    return flags;
+  }, [arvValue, askingPriceValue, realEstateProfile.occupancy, realEstateProfile.painPoints.length, realEstateProfile.propertyAddress, sellerMotivationValue]);
+
+  const sellerQuestions = useMemo(() => {
+    const questions = [
+      "What needs to happen for you to feel good about selling this month?",
+      "How soon do you need certainty on price and closing?",
+      "What repairs or property headaches are you most ready to stop dealing with?",
+    ];
+    if (realEstateProfile.occupancy === "TENANT_OCCUPIED") questions.push("What is the current tenant situation and how flexible is access?");
+    if (realEstateProfile.leadType === "PROBATE") questions.push("Who is authorized to sign and where are you in probate?");
+    if (realEstateProfile.leadType === "PRE_FORECLOSURE") questions.push("What lender deadlines are coming up?");
+    if (realEstateProfile.painPoints.includes("Inherited property")) questions.push("Are there any heirs or family approvals needed before signing?");
+    return questions.slice(0, 5);
+  }, [realEstateProfile.leadType, realEstateProfile.occupancy, realEstateProfile.painPoints]);
+
+  const nextActions = useMemo(() => {
+    const actions = [
+      "Confirm exact property address and decision-maker",
+      "Validate ARV with three nearby sold comps",
+      "Tighten rehab estimate before pricing final offer",
+    ];
+    if (realEstateProfile.timeline === "ASAP") actions.push("Secure walkthrough or inspection window within 24 hours");
+    if (recommendedStrategy === "CREATIVE_FINANCE") actions.push("Probe mortgage balance, payment, and rate for terms structure");
+    if (recommendedStrategy === "WHOLESALE") actions.push("Pre-qualify investor exit before presenting the final cash number");
+    return actions.slice(0, 5);
+  }, [realEstateProfile.timeline, recommendedStrategy]);
+
+  const stretchOfferValue =
+    maoValue === null
+      ? null
+      : Math.round(
+          maoValue +
+            Math.max(0, (askingPriceValue ?? maoValue) - maoValue) * 0.35,
+        );
+  const creativeFinanceAnchorValue =
+    askingPriceValue !== null ? Math.round(askingPriceValue * 0.95) : arvValue === null ? null : Math.round(arvValue * 0.88);
+  const novationAnchorValue = arvValue === null ? null : Math.round(arvValue * 0.87 - rehabBudgetValue * 0.25);
+  const grossSpreadValue = arvValue === null || askingPriceValue === null ? null : Math.round(arvValue - askingPriceValue - rehabBudgetValue);
 
   const fallbackPlaybook = useMemo<AIDynamicPlaybook>(
     () => ({
       scripts: [
-        `Hey ${leadName}, I noticed your current site creates friction on mobile when people are trying to book fast. I built a conversion-focused version for you here: ${deployedUrl || "your preview link"}.`,
-        "We can launch this today with no downtime, route calls and form leads directly into your booking flow, and reduce drop-offs from high-intent visitors.",
-        "If even a few missed calls per week convert, this upgrade can pay for itself quickly while adding predictable monthly revenue.",
+        `Open with the property, not the pitch: "I’m calling about ${realEstateProfile.propertyAddress || leadName}. If we could make the timing and repair headache easier, what would you need to see from an offer?"`,
+        `Recommended angle: ${recommendedStrategy.replaceAll("_", " ")}. Lead scores ${opportunityScore}/100 with ${realEstateProfile.condition.toLowerCase().replaceAll("_", " ")} condition and ${sellerMotivationValue}/10 motivation.`,
+        `Working numbers: asking ${formatCurrency(askingPriceValue)}, ARV ${formatCurrency(arvValue)}, rehab ${formatCurrency(rehabBudgetValue)}, cash ceiling ${formatCurrency(maoValue)}.`,
       ],
       objections: [
         {
-          objection: "I already have a website.",
-          counter: "Totally fair. This offer is about conversion performance, not just design. The goal is more booked jobs from the same traffic.",
+          objection: "Your offer is too low.",
+          counter: "I understand. I’m pricing in repairs, timeline, and certainty. If speed or as-is convenience matters more than listing, we can structure around that.",
         },
         {
-          objection: "I need to think about it.",
+          objection: "I want to list it first.",
           counter: "Absolutely. Let’s do a quick 10-minute walkthrough and map expected lead lift so you can decide with numbers, not guesses.",
         },
         {
@@ -816,11 +919,11 @@ export default function LeadExecutionPage() {
           counter: "Yes — I’ll send the preview and ROI summary now, then hold your deployment slot for 24 hours so you can move when ready.",
         },
       ],
-      closing: "Want me to lock this in and have it live today so your next inbound lead lands on the optimized version?",
-      roiSnapshot: "Most local service sites lose high-intent mobile traffic; even 3-5 recovered bookings/month can mean thousands in missed revenue regained.",
-      injectedData: ["AI deep research summary", "Mobile booking conversion gap", "Live preview + speed-to-launch angle"],
+      closing: `Best next move: present a ${recommendedStrategy === "WHOLESALE" ? "cash" : recommendedStrategy === "CREATIVE_FINANCE" ? "creative" : "market-backed"} option anchored around ${formatCurrency(lastOfferValue ?? maoValue)} and book the walkthrough before the seller cools off.`,
+      roiSnapshot: `Deal math snapshot: cash ceiling ${formatCurrency(maoValue)} | flip spread ${formatCurrency(flipProfitValue)} | rental margin ${buyHoldMarginValue === null ? "n/a" : `${currencyFormatter.format(buyHoldMarginValue)}/mo`}.`,
+      injectedData: ["ARV vs ask spread", "rehab budget", "seller motivation", "occupancy + timeline"],
     }),
-    [leadName, deployedUrl],
+    [arvValue, askingPriceValue, buyHoldMarginValue, flipProfitValue, leadName, lastOfferValue, maoValue, opportunityScore, realEstateProfile.condition, realEstateProfile.propertyAddress, recommendedStrategy, rehabBudgetValue, sellerMotivationValue],
   );
 
   const [aiPlaybook, setAiPlaybook] = useState<AIDynamicPlaybook>(fallbackPlaybook);
@@ -828,6 +931,41 @@ export default function LeadExecutionPage() {
   useEffect(() => {
     setAiPlaybook(fallbackPlaybook);
   }, [fallbackPlaybook]);
+
+  const visiblePlaybook = useMemo<AIDynamicPlaybook>(() => {
+    const cleanText = (value: string) =>
+      value
+        .replaceAll("â€™", "'")
+        .replaceAll("â€œ", '"')
+        .replaceAll("â€", '"')
+        .replaceAll("â€”", "-")
+        .replaceAll("â€¢", "-")
+        .replaceAll("â†’", "->");
+
+    const normalizeCounter = (objection: string, counter: string) => {
+      if (objection === "I want to list it first.") {
+        return "That makes sense. Before you do, let's compare what listing prep, repairs, and days on market could look like against an as-is path.";
+      }
+      if (objection === "Can you send details?") {
+        return "Yes. I'll send the numbers, repair assumptions, and the offer path we discussed so you can review it with everyone involved.";
+      }
+      return cleanText(counter);
+    };
+
+    return {
+      scripts: aiPlaybook.scripts.map((script) => cleanText(script)),
+      objections: aiPlaybook.objections.map((item) => {
+        const objection = cleanText(item.objection);
+        return {
+          objection,
+          counter: normalizeCounter(objection, item.counter),
+        };
+      }),
+      closing: cleanText(aiPlaybook.closing),
+      roiSnapshot: cleanText(aiPlaybook.roiSnapshot),
+      injectedData: aiPlaybook.injectedData.map((item) => cleanText(item)),
+    };
+  }, [aiPlaybook]);
 
   async function persistContacts(nextContacts: LeadContactRecord[]) {
     if (!leadId) {
@@ -963,132 +1101,113 @@ export default function LeadExecutionPage() {
     }
   }
 
-  async function handleDeploySite() {
-    if (!leadId) {
-      setDeployError("This lead is missing an id, so deployment cannot be started.");
-      return;
+  async function persistLeadSourcePayloadUpdates(patch: Record<string, unknown>) {
+    if (!leadId) throw new Error("This lead is missing an id.");
+
+    const existingSourcePayload = (lead?.source_payload ?? lead?.sourcePayload ?? {}) as Record<string, unknown>;
+    const nextSourcePayload = { ...existingSourcePayload, ...patch };
+    const { error } = await supabase.from("leads").update({ source_payload: nextSourcePayload }).eq("id", leadId);
+
+    if (error) {
+      throw new Error(error.message || "Unable to save lead updates.");
     }
 
-    setDeployLoading(true);
-    setDeployError("");
-    setDeployStartedAt(Date.now());
-    setDeployProgress(8);
-    setDeployStageLabel("Starting deployment...");
+    setLead((previous) =>
+      previous
+        ? {
+            ...previous,
+            source_payload: nextSourcePayload as LeadSourcePayload,
+            sourcePayload: nextSourcePayload as LeadSourcePayload,
+          }
+        : previous,
+    );
 
-    const templateConfigOverrides = {
-      business: {
-        name: leadName,
-        city: leadCity,
-      },
-      geo: {
-        primaryLocation: leadCity,
-      },
-      branding: {
-        logoUrl: brandingLogoUrl.trim(),
-        heroImageUrl: brandingHeroImageUrl.trim(),
-        primaryColor: brandingPrimaryColor,
-        secondaryColor: brandingSecondaryColor,
-      },
-      research: {
-        summary: researchInsight.trim(),
-      },
-    };
+    return nextSourcePayload;
+  }
 
+  async function saveRealEstateProfile() {
     try {
-      const response = await fetch("/api/deploy", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          leadId,
-          templateId: selectedTemplateId,
-          researchOutput: researchInsight.trim() || undefined,
-          templateConfigOverrides,
-          env: {
-            NEXT_PUBLIC_BUSINESS_NAME: leadName,
-            NEXT_PUBLIC_PRIMARY_COLOR: brandingPrimaryColor,
-            NEXT_PUBLIC_SECONDARY_COLOR: brandingSecondaryColor,
-            NEXT_PUBLIC_LOGO_URL: brandingLogoUrl.trim(),
-            NEXT_PUBLIC_HERO_URL: brandingHeroImageUrl.trim(),
-            NEXT_PUBLIC_FEATURE_IMAGE_URL: brandingHeroImageUrl.trim(),
-          },
-        }),
+      setRealEstateSaving(true);
+      setRealEstateError("");
+      setRealEstateSaveMessage("");
+      await persistLeadSourcePayloadUpdates({
+        realEstateProfile: {
+          ...realEstateProfile,
+          strategy: recommendedStrategy,
+          sellerMotivation: String(sellerMotivationValue),
+        },
       });
-
-      const payload = (await response.json().catch(() => null)) as { url?: string; deployedUrl?: string; liveUrl?: string; project?: string; deploymentId?: string; error?: string } | null;
-
-      if (!response.ok) {
-        throw new Error(payload?.error || "Deployment failed.");
-      }
-
-      const fallbackProjectUrl = payload?.project ? `https://${payload.project}.vercel.app` : undefined;
-      const returnedUrl = payload?.liveUrl || payload?.deployedUrl || payload?.url || fallbackProjectUrl;
-
-      setDeployProgress(20);
-      setDeployStageLabel("Deployment queued. Preparing your live site...");
-
-      if (returnedUrl || payload?.deploymentId) {
-        setLead((previous) =>
-          previous
-            ? {
-                ...previous,
-                deployed_url: returnedUrl || previous.deployed_url || previous.deployedUrl || "",
-                deployedUrl: returnedUrl || previous.deployedUrl || previous.deployed_url || "",
-                site_status: "BUILDING",
-                siteStatus: "BUILDING",
-                vercel_deployment_id: payload?.deploymentId || previous.vercel_deployment_id || previous.vercelDeploymentId || null,
-                vercelDeploymentId: payload?.deploymentId || previous.vercelDeploymentId || previous.vercel_deployment_id || null,
-                source_payload: {
-                  ...(previous.source_payload ?? previous.sourcePayload ?? {}),
-                  templateBranding: {
-                    logoUrl: brandingLogoUrl.trim(),
-                    heroImageUrl: brandingHeroImageUrl.trim(),
-                    primaryColor: brandingPrimaryColor,
-                    secondaryColor: brandingSecondaryColor,
-                  },
-                },
-              }
-            : previous,
-        );
-      }
+      setRealEstateSaveMessage("Evaluation saved to this lead.");
+      window.setTimeout(() => setRealEstateSaveMessage(""), 1800);
     } catch (error) {
-      setDeployProgress(100);
-      setDeployStageLabel("Deployment failed.");
-      setDeployStartedAt(null);
-      setDeployError(error instanceof Error ? error.message : "Unable to deploy this lead right now.");
+      setRealEstateError(error instanceof Error ? error.message : "Unable to save the evaluation.");
     } finally {
-      setDeployLoading(false);
+      setRealEstateSaving(false);
     }
   }
 
-  async function handleBrandingFileUpload(file: File | undefined, target: "logo" | "hero") {
-    if (!file) return;
+  async function logDealSummaryNote() {
+    if (!leadId) return;
 
-    setDeployError("");
+    const response = await fetch("/api/lead-notes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        leadId,
+        channel: "notes",
+        content: buildDealSummary(leadName, leadCity, realEstateProfile, recommendedStrategy, opportunityScore, maoValue, flipProfitValue, buyHoldMarginValue),
+      }),
+    });
 
+    const payload = (await response.json().catch(() => null)) as { note?: LeadNoteRecord; error?: string } | null;
+    if (!response.ok || !payload?.note) {
+      setRealEstateError(payload?.error || "Unable to log the deal summary.");
+      return;
+    }
+
+    setNotes((previous) => [payload.note as LeadNoteRecord, ...previous]);
+  }
+
+  function togglePainPoint(tag: string) {
+    setRealEstateProfile((previous) => ({
+      ...previous,
+      painPoints: previous.painPoints.includes(tag)
+        ? previous.painPoints.filter((item) => item !== tag)
+        : [...previous.painPoints, tag],
+    }));
+  }
+
+  function applySuggestedOffer(nextOffer: number | null, nextStrategy?: DealStrategy) {
+    if (nextOffer === null) return;
+
+    setRealEstateProfile((previous) => ({
+      ...previous,
+      lastOffer: String(Math.round(nextOffer)),
+      strategy: nextStrategy ?? previous.strategy,
+    }));
+    setLeadExecutionStatus("Offer Sent");
+  }
+
+  async function handleBrandingFileUpload(_file?: File | null, _kind?: "logo" | "hero") {
+    return;
+  }
+
+  function handleDeploySite() {
+    return;
+  }
+
+  function handleCheckoutAction() {
+    return;
+  }
+
+  async function copyCheckoutLink() {
+    if (!checkoutLink) return;
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("leadId", leadId || "lead");
-      formData.append("target", target);
-
-      const response = await fetch("/api/storage/upload", {
-        method: "POST",
-        body: formData,
-      });
-
-      const payload = (await response.json().catch(() => null)) as { url?: string; error?: string } | null;
-
-      if (!response.ok || !payload?.url) {
-        throw new Error(payload?.error || "Unable to upload the image to storage.");
-      }
-
-      if (target === "logo") {
-        setBrandingLogoUrl(payload.url);
-      } else {
-        setBrandingHeroImageUrl(payload.url);
-      }
-    } catch (error) {
-      setDeployError(error instanceof Error ? error.message : "Unable to process the uploaded image.");
+      await navigator.clipboard.writeText(checkoutLink);
+      setCheckoutLinkCopied(true);
+      window.setTimeout(() => setCheckoutLinkCopied(false), 1200);
+    } catch {
+      setCheckoutLinkCopied(false);
     }
   }
 
@@ -1121,7 +1240,7 @@ export default function LeadExecutionPage() {
       }
 
       setMeetingLink(payload.meetLink);
-      setLeadExecutionStatus("Demo Booked");
+      setLeadExecutionStatus("Walkthrough Set");
 
       const existingSourcePayload = (lead?.source_payload ?? lead?.sourcePayload ?? {}) as Record<string, unknown>;
       const nextDemoBooking = {
@@ -1188,7 +1307,7 @@ export default function LeadExecutionPage() {
         month: "short",
         day: "numeric",
       });
-    const inviteText = `Demo booked for ${leadName} on ${dayLabel} at ${selectedMeetingTime} (${leadTimeZone}). Join here: ${meetingLink}`;
+    const inviteText = `Walkthrough booked for ${leadName} on ${dayLabel} at ${selectedMeetingTime} (${leadTimeZone}). Join here: ${meetingLink}`;
 
     try {
       await navigator.clipboard.writeText(inviteText);
@@ -1199,53 +1318,18 @@ export default function LeadExecutionPage() {
     }
   }
 
-  async function handleCheckoutAction() {
-    setCheckoutLoading(true);
-    setCheckoutLinkCopied(false);
-
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-
-    if (checkoutAmount >= 500) {
-      setApprovalPending(false);
-      setCheckoutLink(`buy.stripe.com/test_123?amount=${Math.round(checkoutAmount * 100)}`);
-      setLeadExecutionStatus("Payment Pending");
-      setCheckoutLoading(false);
-      return;
-    }
-
-    setCheckoutLink("");
-    setApprovalPending(true);
-    setLeadExecutionStatus("Awaiting Approval");
-    setCheckoutLoading(false);
-  }
-
-  function extractStripeValueFromLink(link: string) {
-    try {
-      const safeUrl = link.startsWith("http://") || link.startsWith("https://") ? link : `https://${link}`;
-      const parsed = new URL(safeUrl);
-      const amount = parsed.searchParams.get("amount");
-      const amountTotal = parsed.searchParams.get("amount_total");
-      const unitAmount = parsed.searchParams.get("unit_amount");
-      const amountParam = amount ?? amountTotal ?? unitAmount;
-      if (!amountParam) return null;
-
-      const numericAmount = Number(amountParam);
-      if (!Number.isFinite(numericAmount)) return null;
-
-      const shouldTreatAsCents = amountTotal !== null || unitAmount !== null || amountParam.includes(".") === false;
-      return shouldTreatAsCents ? numericAmount / 100 : numericAmount;
-    } catch {
-      return null;
-    }
-  }
-
   async function markLeadAsClosedDeal() {
     if (!leadId) return;
 
     setClosingDeal(true);
     setCloseDealError("");
 
-    const inferredDealValue = extractStripeValueFromLink(checkoutLink) ?? checkoutAmount;
+    const inferredDealValue =
+      lastOfferValue ??
+      askingPriceValue ??
+      maoValue ??
+      arvValue ??
+      0;
 
     try {
       const response = await fetch("/api/leads/close", {
@@ -1254,7 +1338,7 @@ export default function LeadExecutionPage() {
         body: JSON.stringify({
           leadId,
           closedDealValue: inferredDealValue,
-          stripeCheckoutLink: checkoutLink || null,
+          stripeCheckoutLink: null,
         }),
       });
 
@@ -1277,7 +1361,7 @@ export default function LeadExecutionPage() {
                 ...(previous.source_payload ?? previous.sourcePayload ?? {}),
                 closedDealValue: payload.closed?.closedDealValue ?? inferredDealValue,
                 closedAt: payload.closed?.closedAt ?? new Date().toISOString(),
-                stripeCheckoutLink: payload.closed?.stripeCheckoutLink ?? (checkoutLink || null),
+                stripeCheckoutLink: payload.closed?.stripeCheckoutLink ?? null,
               },
             }
           : previous,
@@ -1288,18 +1372,6 @@ export default function LeadExecutionPage() {
     } catch (error) {
       setCloseDealError(error instanceof Error ? error.message : "Unable to mark this lead as closed right now.");
       setClosingDeal(false);
-    }
-  }
-
-  async function copyCheckoutLink() {
-    if (!checkoutLink) return;
-
-    try {
-      await navigator.clipboard.writeText(checkoutLink);
-      setCheckoutLinkCopied(true);
-      window.setTimeout(() => setCheckoutLinkCopied(false), 1400);
-    } catch {
-      setCheckoutLinkCopied(false);
     }
   }
 
@@ -1437,7 +1509,12 @@ export default function LeadExecutionPage() {
         body: JSON.stringify({
           leadName,
           activeTab,
-          researchContext: researchInsight || `Website: ${leadWebsite}`,
+          researchContext: [
+            researchInsight || "No AI research summary available.",
+            `Property: ${realEstateProfile.propertyAddress || leadName}`,
+            `Strategy: ${recommendedStrategy}`,
+            `Offer ceiling: ${formatCurrency(maoValue)}`,
+          ].join("\n"),
         }),
       });
       const data = (await response.json().catch(() => null)) as { draft?: string } | null;
@@ -1468,9 +1545,13 @@ export default function LeadExecutionPage() {
           activeTab: "PLAYBOOK",
           researchContext: [
             researchInsight || "No AI research summary available.",
-            `Website: ${leadWebsite}`,
+            `Property: ${realEstateProfile.propertyAddress || leadName}`,
             `City: ${leadCity}`,
-            deployedUrl ? `Preview Link: ${deployedUrl}` : "No preview link available.",
+            `Asking: ${formatCurrency(askingPriceValue)}`,
+            `ARV: ${formatCurrency(arvValue)}`,
+            `Rehab: ${formatCurrency(rehabBudgetValue)}`,
+            `Recommended strategy: ${recommendedStrategy}`,
+            realEstateProfile.painPoints.length ? `Pain points: ${realEstateProfile.painPoints.join(", ")}` : "Pain points: none tagged",
           ].join("\n"),
         }),
       });
@@ -1875,7 +1956,7 @@ export default function LeadExecutionPage() {
                 "No Answer",
                 "Call Back",
                 "Wrong Number",
-                "Booked Demo",
+                "Walkthrough Set",
               ].map((option) => (
                 <button
                   key={option}
@@ -1958,11 +2039,11 @@ export default function LeadExecutionPage() {
                     : "border-indigo-400/30 bg-indigo-500/15 text-indigo-200"
                 }`}
               >
-                {isDemoBooked ? "Demo Booked" : leadExecutionStatus}
+                {isDemoBooked ? "Walkthrough Set" : leadExecutionStatus}
               </span>
               {isDemoBooked ? (
                 <div className="rounded-lg border border-fuchsia-300/70 bg-gradient-to-r from-fuchsia-600/35 to-violet-600/35 p-3 shadow-[0_0_30px_rgba(217,70,239,0.25)]">
-                  <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-fuchsia-100">Demo Booked</p>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-fuchsia-100">Walkthrough Set</p>
                   <p className="mt-1 text-xs text-fuchsia-100/90">
                     {leadDemoBooking?.date && leadDemoBooking?.time
                       ? `${leadDemoBooking.date} at ${leadDemoBooking.time}${leadDemoBooking?.timeZone ? ` (${leadDemoBooking.timeZone})` : ""}`
@@ -2060,7 +2141,300 @@ export default function LeadExecutionPage() {
             </div>
           </div>
 
-          <div className="rounded-xl bg-gradient-to-br from-indigo-600 to-purple-600 p-4 shadow-lg shadow-indigo-900/40">
+          <div className="rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/10 via-zinc-900 to-zinc-950 p-4 shadow-lg shadow-emerald-950/20">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-white">Deal Evaluation Lab</p>
+                <p className="mt-1 text-xs text-emerald-100/80">Pressure-test the property, seller motivation, and offer path before you move this lead forward.</p>
+              </div>
+              <span className="rounded-lg border border-white/15 bg-white/10 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-white">
+                {opportunityScore}/100
+              </span>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-zinc-200">
+              <div className="rounded-lg border border-emerald-500/20 bg-zinc-950/60 p-3">
+                <p className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">Strategy</p>
+                <p className="mt-1 text-sm font-semibold text-white">{recommendedStrategy.replaceAll("_", " ")}</p>
+              </div>
+              <div className="rounded-lg border border-emerald-500/20 bg-zinc-950/60 p-3">
+                <p className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">Cash Ceiling</p>
+                <p className="mt-1 text-sm font-semibold text-white">{formatCurrency(maoValue)}</p>
+              </div>
+              <div className="rounded-lg border border-emerald-500/20 bg-zinc-950/60 p-3">
+                <p className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">Flip Spread</p>
+                <p className="mt-1 text-sm font-semibold text-white">{formatCurrency(flipProfitValue)}</p>
+              </div>
+              <div className="rounded-lg border border-emerald-500/20 bg-zinc-950/60 p-3">
+                <p className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">Rental Margin</p>
+                <p className="mt-1 text-sm font-semibold text-white">
+                  {buyHoldMarginValue === null ? "Not enough data" : `${currencyFormatter.format(buyHoldMarginValue)}/mo`}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <label className="space-y-1">
+                <span className="block text-[11px] uppercase tracking-[0.16em] text-zinc-500">Property Address</span>
+                <input
+                  value={realEstateProfile.propertyAddress}
+                  onChange={(event) => setRealEstateProfile((previous) => ({ ...previous, propertyAddress: event.target.value }))}
+                  placeholder="123 Palm Avenue"
+                  className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="block text-[11px] uppercase tracking-[0.16em] text-zinc-500">Lead Type</span>
+                <select
+                  value={realEstateProfile.leadType}
+                  onChange={(event) => setRealEstateProfile((previous) => ({ ...previous, leadType: event.target.value as RealEstateLeadType }))}
+                  className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+                >
+                  {([
+                    ["OFF_MARKET", "Off Market"],
+                    ["FSBO", "FSBO"],
+                    ["PROBATE", "Probate"],
+                    ["PRE_FORECLOSURE", "Pre-Foreclosure"],
+                    ["VACANT", "Vacant"],
+                    ["REALTOR", "Realtor"],
+                    ["LAND", "Land"],
+                    ["MULTIFAMILY", "Multifamily"],
+                    ["UNKNOWN", "Unknown"],
+                  ] as const).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1">
+                <span className="block text-[11px] uppercase tracking-[0.16em] text-zinc-500">Asking Price</span>
+                <input
+                  value={realEstateProfile.askingPrice}
+                  onChange={(event) => setRealEstateProfile((previous) => ({ ...previous, askingPrice: event.target.value }))}
+                  placeholder="250000"
+                  className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="block text-[11px] uppercase tracking-[0.16em] text-zinc-500">ARV</span>
+                <input
+                  value={realEstateProfile.arv}
+                  onChange={(event) => setRealEstateProfile((previous) => ({ ...previous, arv: event.target.value }))}
+                  placeholder="340000"
+                  className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="block text-[11px] uppercase tracking-[0.16em] text-zinc-500">Rehab Budget</span>
+                <input
+                  value={realEstateProfile.rehabBudget}
+                  onChange={(event) => setRealEstateProfile((previous) => ({ ...previous, rehabBudget: event.target.value }))}
+                  placeholder="45000"
+                  className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="block text-[11px] uppercase tracking-[0.16em] text-zinc-500">Rent Estimate</span>
+                <input
+                  value={realEstateProfile.rentEstimate}
+                  onChange={(event) => setRealEstateProfile((previous) => ({ ...previous, rentEstimate: event.target.value }))}
+                  placeholder="2400"
+                  className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="block text-[11px] uppercase tracking-[0.16em] text-zinc-500">Taxes / Year</span>
+                <input
+                  value={realEstateProfile.taxesAnnual}
+                  onChange={(event) => setRealEstateProfile((previous) => ({ ...previous, taxesAnnual: event.target.value }))}
+                  placeholder="3600"
+                  className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="block text-[11px] uppercase tracking-[0.16em] text-zinc-500">Insurance / Year</span>
+                <input
+                  value={realEstateProfile.insuranceAnnual}
+                  onChange={(event) => setRealEstateProfile((previous) => ({ ...previous, insuranceAnnual: event.target.value }))}
+                  placeholder="1800"
+                  className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="block text-[11px] uppercase tracking-[0.16em] text-zinc-500">HOA / Month</span>
+                <input
+                  value={realEstateProfile.hoaMonthly}
+                  onChange={(event) => setRealEstateProfile((previous) => ({ ...previous, hoaMonthly: event.target.value }))}
+                  placeholder="0"
+                  className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="block text-[11px] uppercase tracking-[0.16em] text-zinc-500">Assignment Fee</span>
+                <input
+                  value={realEstateProfile.assignmentFee}
+                  onChange={(event) => setRealEstateProfile((previous) => ({ ...previous, assignmentFee: event.target.value }))}
+                  placeholder="15000"
+                  className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="block text-[11px] uppercase tracking-[0.16em] text-zinc-500">Desired Profit</span>
+                <input
+                  value={realEstateProfile.desiredProfit}
+                  onChange={(event) => setRealEstateProfile((previous) => ({ ...previous, desiredProfit: event.target.value }))}
+                  placeholder="40000"
+                  className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+                />
+              </label>
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <label className="space-y-1">
+                <span className="block text-[11px] uppercase tracking-[0.16em] text-zinc-500">Occupancy</span>
+                <select
+                  value={realEstateProfile.occupancy}
+                  onChange={(event) => setRealEstateProfile((previous) => ({ ...previous, occupancy: event.target.value as OccupancyStatus }))}
+                  className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+                >
+                  {([
+                    ["VACANT", "Vacant"],
+                    ["OWNER_OCCUPIED", "Owner Occupied"],
+                    ["TENANT_OCCUPIED", "Tenant Occupied"],
+                    ["UNKNOWN", "Unknown"],
+                  ] as const).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1">
+                <span className="block text-[11px] uppercase tracking-[0.16em] text-zinc-500">Condition</span>
+                <select
+                  value={realEstateProfile.condition}
+                  onChange={(event) => setRealEstateProfile((previous) => ({ ...previous, condition: event.target.value as ConditionStatus }))}
+                  className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+                >
+                  {([
+                    ["LIGHT", "Light"],
+                    ["MODERATE", "Moderate"],
+                    ["HEAVY", "Heavy"],
+                    ["FULL_GUT", "Full Gut"],
+                  ] as const).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1">
+                <span className="block text-[11px] uppercase tracking-[0.16em] text-zinc-500">Timeline</span>
+                <select
+                  value={realEstateProfile.timeline}
+                  onChange={(event) => setRealEstateProfile((previous) => ({ ...previous, timeline: event.target.value as SellerTimeline }))}
+                  className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+                >
+                  {([
+                    ["ASAP", "ASAP"],
+                    ["30_DAYS", "30 Days"],
+                    ["60_90_DAYS", "60 to 90 Days"],
+                    ["FLEXIBLE", "Flexible"],
+                  ] as const).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">Seller Motivation</p>
+                  <p className="mt-1 text-sm text-zinc-300">How much pressure is on this seller to move now?</p>
+                </div>
+                <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-sm font-semibold text-emerald-200">
+                  {sellerMotivationValue}/10
+                </span>
+              </div>
+              <input
+                type="range"
+                min={1}
+                max={10}
+                step={1}
+                value={sellerMotivationValue}
+                onChange={(event) => setRealEstateProfile((previous) => ({ ...previous, sellerMotivation: event.target.value }))}
+                className="mt-3 h-2 w-full cursor-pointer accent-emerald-400"
+              />
+            </div>
+
+            <div className="mt-4">
+              <p className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">Pain Points</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {REAL_ESTATE_PAIN_POINT_OPTIONS.map((tag) => {
+                  const active = realEstateProfile.painPoints.includes(tag);
+                  return (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => togglePainPoint(tag)}
+                      className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                        active
+                          ? "border-emerald-400/50 bg-emerald-500/15 text-emerald-100"
+                          : "border-zinc-700 bg-zinc-950 text-zinc-300 hover:border-zinc-500"
+                      }`}
+                    >
+                      {tag}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <label className="mt-4 block space-y-1">
+              <span className="block text-[11px] uppercase tracking-[0.16em] text-zinc-500">Rep Notes</span>
+              <textarea
+                value={realEstateProfile.notes}
+                onChange={(event) => setRealEstateProfile((previous) => ({ ...previous, notes: event.target.value }))}
+                placeholder="Condition details, seller story, lender pressure, title issues, tenant situation..."
+                className="h-24 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+              />
+            </label>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={saveRealEstateProfile}
+                disabled={realEstateSaving}
+                className="rounded-md bg-emerald-500 px-3 py-2 text-xs font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {realEstateSaving ? "Saving..." : "Save Evaluation"}
+              </button>
+              <button
+                type="button"
+                onClick={() => applySuggestedOffer(maoValue, recommendedStrategy)}
+                disabled={maoValue === null}
+                className="rounded-md border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 transition hover:border-zinc-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Set Offer to Cash Ceiling
+              </button>
+              <button
+                type="button"
+                onClick={logDealSummaryNote}
+                disabled={!leadId}
+                className="rounded-md border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 transition hover:border-zinc-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Log Deal Summary
+              </button>
+            </div>
+            {realEstateSaveMessage ? <p className="mt-2 text-xs text-emerald-300">{realEstateSaveMessage}</p> : null}
+            {realEstateError ? <p className="mt-2 text-xs text-rose-300">{realEstateError}</p> : null}
+          </div>
+
+          <div className="hidden rounded-xl bg-gradient-to-br from-indigo-600 to-purple-600 p-4 shadow-lg shadow-indigo-900/40">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-sm font-semibold text-white">Deploy Vercel Site</p>
@@ -2172,17 +2546,17 @@ export default function LeadExecutionPage() {
 
           <div className="rounded-xl border border-zinc-700/80 bg-zinc-900 p-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold">AI Deep Research</h2>
+              <h2 className="text-sm font-semibold">Market &amp; Seller Research</h2>
               <button
                 onClick={runResearch}
                 disabled={researchLoading}
                 className="rounded-lg border border-zinc-600 px-3 py-1 text-xs transition hover:border-zinc-300 disabled:opacity-50"
               >
-                {researchLoading ? "Running..." : researchInsight ? "Rerun Analysis" : "Run Analysis"}
+                {researchLoading ? "Running..." : researchInsight ? "Refresh Research" : "Run Research"}
               </button>
             </div>
             <p className="mt-4 min-h-14 text-sm text-zinc-300">
-              {researchInsight || "Run analysis to generate localized insights and conversion weaknesses."}
+              {researchInsight || "Run research to generate local market context, seller signals, and property-specific talking points."}
             </p>
             {researchError ? <p className="mt-2 text-xs text-rose-300">{researchError}</p> : null}
           </div>
@@ -2647,9 +3021,9 @@ export default function LeadExecutionPage() {
                   Booking...
                 </>
               ) : meetingLink ? (
-                "Demo Booked! • Meet link generated"
+                "Walkthrough Set! - Meet link generated"
               ) : (
-                "Book & Generate Meet Link"
+                "Book Walkthrough"
               )}
             </button>
             {meetingError ? <p className="mt-2 text-xs text-rose-300">{meetingError}</p> : null}
@@ -2660,7 +3034,7 @@ export default function LeadExecutionPage() {
                   onClick={goToUpcomingDemos}
                   className="w-full rounded-lg bg-emerald-500 px-3 py-2 text-xs font-semibold text-zinc-950 transition hover:bg-emerald-400"
                 >
-                  Booked Demo → View Upcoming Demos
+                  Walkthrough Set | View Upcoming Appointments
                 </button>
                 <a
                   href={meetingLink.startsWith("http") ? meetingLink : `https://${meetingLink}`}
@@ -2681,6 +3055,93 @@ export default function LeadExecutionPage() {
           </div>
 
           <div className="rounded-xl border border-zinc-700/80 bg-zinc-900 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold">Offer Builder</h2>
+                <p className="mt-1 text-xs text-zinc-500">Use the current deal math to set the next offer and push the lead through acquisition stages.</p>
+              </div>
+              <select
+                value={leadExecutionStatus}
+                onChange={(event) => setLeadExecutionStatus(event.target.value as ExecutionLeadStatus)}
+                className="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-xs font-semibold text-zinc-200 outline-none focus:border-zinc-500"
+              >
+                {EXECUTION_STATUS_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-zinc-200">
+              <div className="rounded-lg border border-zinc-700 bg-zinc-950 p-3">
+                <p className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">Last Offer</p>
+                <p className="mt-1 text-sm font-semibold text-white">{formatCurrency(lastOfferValue)}</p>
+              </div>
+              <div className="rounded-lg border border-zinc-700 bg-zinc-950 p-3">
+                <p className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">Gross Spread</p>
+                <p className="mt-1 text-sm font-semibold text-white">{formatCurrency(grossSpreadValue)}</p>
+              </div>
+              <div className="rounded-lg border border-zinc-700 bg-zinc-950 p-3">
+                <p className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">Stretch Offer</p>
+                <p className="mt-1 text-sm font-semibold text-white">{formatCurrency(stretchOfferValue)}</p>
+              </div>
+              <div className="rounded-lg border border-zinc-700 bg-zinc-950 p-3">
+                <p className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">Creative Anchor</p>
+                <p className="mt-1 text-sm font-semibold text-white">{formatCurrency(creativeFinanceAnchorValue)}</p>
+              </div>
+            </div>
+
+            <label className="mt-4 block space-y-1">
+              <span className="block text-xs uppercase tracking-wide text-zinc-500">Current Offer</span>
+              <div className="flex items-center rounded-lg border border-zinc-700 bg-zinc-950 px-3 focus-within:border-zinc-500">
+                <span className="text-sm text-zinc-400">$</span>
+                <input
+                  value={realEstateProfile.lastOffer}
+                  onChange={(event) => setRealEstateProfile((previous) => ({ ...previous, lastOffer: event.target.value }))}
+                  className="h-10 w-full bg-transparent px-2 text-sm text-zinc-100 outline-none"
+                  placeholder="0"
+                />
+              </div>
+            </label>
+
+            <div className="mt-4 grid grid-cols-1 gap-2">
+              <button
+                type="button"
+                onClick={() => applySuggestedOffer(maoValue, recommendedStrategy)}
+                disabled={maoValue === null}
+                className="rounded-lg bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Use Cash Ceiling Offer
+              </button>
+              <button
+                type="button"
+                onClick={() => applySuggestedOffer(stretchOfferValue, recommendedStrategy)}
+                disabled={stretchOfferValue === null}
+                className="rounded-lg border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:border-zinc-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Use Stretch Offer
+              </button>
+              <button
+                type="button"
+                onClick={() => applySuggestedOffer(novationAnchorValue, "NOVATION")}
+                disabled={novationAnchorValue === null}
+                className="rounded-lg border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:border-zinc-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Use Novation Anchor
+              </button>
+              <button
+                type="button"
+                onClick={() => applySuggestedOffer(creativeFinanceAnchorValue, "CREATIVE_FINANCE")}
+                disabled={creativeFinanceAnchorValue === null}
+                className="rounded-lg border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:border-zinc-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Use Creative Terms Anchor
+              </button>
+            </div>
+          </div>
+
+          <div className="hidden rounded-xl border border-zinc-700/80 bg-zinc-900 p-4">
             <h2 className="text-sm font-semibold">Checkout &amp; Payments</h2>
             <p className="mt-1 text-xs text-zinc-500">Generate a Stripe checkout link instantly, or route sub-$500 deals for manager approval.</p>
 
@@ -2754,7 +3215,7 @@ export default function LeadExecutionPage() {
             <div className="mb-4 flex items-center justify-between">
               <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-300">
                 <span>🧠</span>
-                Dynamic AI Playbook
+                Acquisition Playbook
               </h2>
               <div className="flex items-center gap-2">
                 <button
@@ -2778,32 +3239,68 @@ export default function LeadExecutionPage() {
 
             {scriptTab === "Scripts" ? (
               <div className="space-y-3 text-sm text-zinc-200">
-                <h3 className="text-sm font-semibold text-zinc-100">Gemini Deep-Research Pitch Sequence</h3>
-                {aiPlaybook.scripts.map((script) => (
+                <h3 className="text-sm font-semibold text-zinc-100">Seller Conversation Sequence</h3>
+                {visiblePlaybook.scripts.map((script) => (
                   <p key={script} className="rounded-lg border border-zinc-700 bg-zinc-950 p-3">
                     {script}
                   </p>
                 ))}
                 <p className="rounded-lg border border-emerald-600/40 bg-emerald-900/20 p-3 text-emerald-100">
-                  <span className="font-semibold">ROI Snapshot:</span> {aiPlaybook.roiSnapshot}
+                  <span className="font-semibold">Deal Snapshot:</span> {visiblePlaybook.roiSnapshot}
                 </p>
                 <p className="rounded-lg border border-indigo-600/40 bg-indigo-950/30 p-3 text-indigo-100">
-                  <span className="font-semibold">Close:</span> {aiPlaybook.closing}
+                  <span className="font-semibold">Best Next Move:</span> {visiblePlaybook.closing}
                 </p>
                 <span className="inline-flex rounded-md border border-zinc-600 px-2 py-1 text-[11px] text-zinc-300">
-                  Injected data: {aiPlaybook.injectedData.join(" + ")}
+                  Inputs: {visiblePlaybook.injectedData.join(" + ")}
                 </span>
                 {playbookError ? <p className="text-xs text-amber-300">{playbookError}</p> : null}
               </div>
             ) : (
-              <ul className="space-y-3 text-sm text-zinc-300">
-                {aiPlaybook.objections.map((item) => (
+              <ul className="hidden space-y-3 text-sm text-zinc-300">
+                {visiblePlaybook.objections.map((item) => (
                   <li key={item.objection} className="rounded-lg border border-zinc-700 bg-zinc-950 p-3">
                     “{item.objection}” → {item.counter}
                   </li>
                 ))}
               </ul>
             )}
+            {scriptTab === "Objections" ? (
+              <ul className="space-y-3 text-sm text-zinc-300">
+                {visiblePlaybook.objections.map((item) => (
+                  <li key={`${item.objection}-clean`} className="rounded-lg border border-zinc-700 bg-zinc-950 p-3">
+                    <p className="font-semibold text-zinc-100">{item.objection}</p>
+                    <p className="mt-1 text-zinc-300">{item.counter}</p>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            <div className="mt-4 grid grid-cols-1 gap-3">
+              <div className="rounded-lg border border-zinc-700 bg-zinc-950 p-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Risk Flags</p>
+                <ul className="mt-2 space-y-2 text-sm text-zinc-300">
+                  {riskFlags.map((flag) => (
+                    <li key={flag}>{flag}</li>
+                  ))}
+                </ul>
+              </div>
+              <div className="rounded-lg border border-zinc-700 bg-zinc-950 p-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Seller Questions</p>
+                <ul className="mt-2 space-y-2 text-sm text-zinc-300">
+                  {sellerQuestions.map((question) => (
+                    <li key={question}>{question}</li>
+                  ))}
+                </ul>
+              </div>
+              <div className="rounded-lg border border-zinc-700 bg-zinc-950 p-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Next Actions</p>
+                <ul className="mt-2 space-y-2 text-sm text-zinc-300">
+                  {nextActions.map((action) => (
+                    <li key={action}>{action}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
           </div>
         </section>
       </div>
