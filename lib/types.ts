@@ -27,6 +27,22 @@ export type InvestorLeadProfile = {
   sourceKind?: "GOOGLE_MAPS" | "CSV_IMPORT" | "MANUAL" | null;
 };
 
+export type BuyerProfile = {
+  id: string;
+  name: string;
+  company?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  markets: string[];
+  assetTypes: string[];
+  strategies: string[];
+  minPrice?: number | null;
+  maxPrice?: number | null;
+  minLeadScore?: number | null;
+  notes?: string | null;
+  updatedAt: string;
+};
+
 export type RealtorPortal = {
   enabled: boolean;
   token: string;

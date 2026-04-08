@@ -1,5 +1,5 @@
 import { mockLeads } from "@/lib/mock-investor-crm";
-import type { Lead } from "@/lib/types";
+import type { BuyerProfile, Lead } from "@/lib/types";
 
 export type DemoCalendarEvent = {
   id: string;
@@ -82,6 +82,73 @@ export function buildDemoOfferDeskLeads(): Lead[] {
       updatedAt: new Date().toISOString(),
     } satisfies Lead;
   });
+}
+
+export function buildDemoBuyerProfiles(): BuyerProfile[] {
+  const today = new Date().toISOString();
+
+  return [
+    {
+      id: "demo-buyer-ridgeway",
+      name: "Marcus Hale",
+      company: "Ridgeway Holdings",
+      email: "marcus@ridgewayholdings.com",
+      phone: "(602) 555-0148",
+      markets: ["Phoenix", "Mesa", "Scottsdale"],
+      assetTypes: ["single family", "townhome"],
+      strategies: ["flip", "wholesale"],
+      minPrice: 110000,
+      maxPrice: 320000,
+      minLeadScore: 70,
+      notes: "Prefers cosmetic-to-medium rehab. Wants first look on probate and pre-foreclosure deals.",
+      updatedAt: today,
+    },
+    {
+      id: "demo-buyer-elmwood",
+      name: "Danielle Brooks",
+      company: "Elmwood Rental Group",
+      email: "dbrooks@elmwoodrentals.com",
+      phone: "(317) 555-0119",
+      markets: ["Indianapolis", "Cleveland", "Columbus"],
+      assetTypes: ["single family", "rental", "small multifamily"],
+      strategies: ["buy and hold", "value-add"],
+      minPrice: 90000,
+      maxPrice: 240000,
+      minLeadScore: 60,
+      notes: "Will stretch for stabilized rentals with clear equity. Likes landlord fatigue and tax delinquent lists.",
+      updatedAt: today,
+    },
+    {
+      id: "demo-buyer-lonestar",
+      name: "Adrian Cruz",
+      company: "Lone Star Capital Buyers",
+      email: "adrian@lonestarcapitalbuyers.com",
+      phone: "(210) 555-0164",
+      markets: ["San Antonio", "Houston", "Austin"],
+      assetTypes: ["single family", "rental", "small multifamily"],
+      strategies: ["flip", "buy and hold"],
+      minPrice: 120000,
+      maxPrice: 360000,
+      minLeadScore: 65,
+      notes: "Can close quickly with proof of funds. Strong fit for inherited homes and owner-occupied distress.",
+      updatedAt: today,
+    },
+    {
+      id: "demo-buyer-peachtree",
+      name: "Kiana Reed",
+      company: "Peachtree Dispo Partners",
+      email: "kiana@peachtreedispo.com",
+      phone: "(404) 555-0182",
+      markets: ["Atlanta", "Marietta", "Decatur"],
+      assetTypes: ["single family", "small multifamily"],
+      strategies: ["wholesale", "flip"],
+      minPrice: 100000,
+      maxPrice: 280000,
+      minLeadScore: 72,
+      notes: "Looks for heavy motivation, clean title path, and enough spread for assignment fees.",
+      updatedAt: today,
+    },
+  ];
 }
 
 export function buildDemoCalendarEvents(): DemoCalendarEvent[] {
