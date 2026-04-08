@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { buildDemoCalendarEvents } from "@/lib/investor-demo-content";
 import type { Lead, RealtorPortal } from "@/lib/types";
 
 type PipelineStage = "New" | "Pitched" | "Awaiting Approval" | "Payment Pending" | "Closed Won" | "No Show";
@@ -36,6 +37,7 @@ type CalendarEvent = {
   meetingUrl?: string | null;
   propertyAddress?: string | null;
   sourceLabel: string;
+  isDemo?: boolean;
 };
 
 type PersistedBookedDemo = {
@@ -367,14 +369,19 @@ export default function DemosPage() {
       })
       .sort((firstEvent, secondEvent) => firstEvent.scheduledAt.getTime() - secondEvent.scheduledAt.getTime());
   }, [cachedEvents, calendarEvents]);
+  const displayEvents = useMemo(
+    () => (eventsWithMeta.length ? eventsWithMeta : buildDemoCalendarEvents().map((event) => ({ ...event, ...formatDateTimeLabel(event.scheduledDate, event.scheduledTime), urgency: classifyUrgency(parseDateTime(event.scheduledDate, event.scheduledTime)), scheduledAt: parseDateTime(event.scheduledDate, event.scheduledTime) }))),
+    [eventsWithMeta],
+  );
+  const showingDemoContent = eventsWithMeta.length === 0;
 
   const stats = useMemo(() => {
-    const today = eventsWithMeta.filter((event) => event.urgency === "Today").length;
-    const next48 = eventsWithMeta.filter((event) => event.urgency === "Next 48 Hours").length;
-    const thisWeek = eventsWithMeta.filter((event) => event.urgency === "This Week").length;
-    const walkthroughs = eventsWithMeta.filter((event) => event.eventType === "Realtor Walkthrough").length;
+    const today = displayEvents.filter((event) => event.urgency === "Today").length;
+    const next48 = displayEvents.filter((event) => event.urgency === "Next 48 Hours").length;
+    const thisWeek = displayEvents.filter((event) => event.urgency === "This Week").length;
+    const walkthroughs = displayEvents.filter((event) => event.eventType === "Realtor Walkthrough").length;
     return { today, next48, thisWeek, walkthroughs };
-  }, [eventsWithMeta]);
+  }, [displayEvents]);
 
   const getSelectedPipelineStage = (event: CalendarEvent) => {
     const normalizedName = event.leadName.trim().toLowerCase();
@@ -405,6 +412,7 @@ export default function DemosPage() {
         <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">Acquisitions Ops</p>
         <h1 className="mt-2 text-3xl font-semibold text-zinc-50">Acquisitions Calendar</h1>
         <p className="mt-2 text-sm text-zinc-400">Track seller appointments, investor calls, and realtor walkthroughs from one queue.</p>
+        {showingDemoContent ? <p className="mt-3 text-xs text-sky-300">Showing built-in demo events because no live appointments or walkthroughs are scheduled yet.</p> : null}
       </header>
 
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -430,13 +438,13 @@ export default function DemosPage() {
       {error ? <p className="text-sm text-amber-300">{error}</p> : null}
 
       <section className="space-y-3">
-        {!loading && eventsWithMeta.length === 0 ? (
+        {!loading && displayEvents.length === 0 ? (
           <article className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 text-sm text-zinc-400">
             No upcoming acquisition events found. Book a seller call, sync a walkthrough, or schedule a follow-up from a lead workspace.
           </article>
         ) : null}
 
-        {eventsWithMeta.map((event) => {
+        {displayEvents.map((event) => {
           const leadHref = event.leadId ? `/leads/${event.leadId}` : null;
           return (
             <article
@@ -483,12 +491,20 @@ export default function DemosPage() {
                 </div>
 
                 <div className="flex w-full flex-col items-end gap-2 self-end lg:w-auto lg:self-auto">
-                  {leadHref ? (
+                  {leadHref && !showingDemoContent ? (
                     <Link
                       href={leadHref}
                       className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-5 py-2.5 text-center text-sm font-medium text-zinc-200 transition hover:border-zinc-600 hover:bg-zinc-900"
                     >
                       Open Lead
+                    </Link>
+                  ) : null}
+                  {!leadHref && showingDemoContent ? (
+                    <Link
+                      href="/offer-desk"
+                      className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-5 py-2.5 text-center text-sm font-medium text-zinc-200 transition hover:border-zinc-600 hover:bg-zinc-900"
+                    >
+                      Open Offer Desk
                     </Link>
                   ) : null}
                   {event.meetingUrl ? (

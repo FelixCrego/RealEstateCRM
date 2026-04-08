@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { buildDemoOfferDeskLeads } from "@/lib/investor-demo-content";
 import type { InvestorLeadCategory, Lead } from "@/lib/types";
 
 type OfferStatus = "DRAFT" | "SENT" | "COUNTERED" | "ACCEPTED" | "PASSED";
@@ -130,10 +131,12 @@ export default function OfferDeskPage() {
         .sort((first, second) => (second.investorProfile?.leadScore ?? 0) - (first.investorProfile?.leadScore ?? 0)),
     [leads],
   );
+  const displayLeads = useMemo(() => (offerableLeads.length ? offerableLeads : buildDemoOfferDeskLeads()), [offerableLeads]);
+  const showingDemoContent = offerableLeads.length === 0;
 
   const deskRows = useMemo(
     () =>
-      offerableLeads.map((lead) => {
+      displayLeads.map((lead) => {
         const override = overrides[lead.id] ?? {};
         return {
           lead,
@@ -149,7 +152,7 @@ export default function OfferDeskPage() {
           note: override.note ?? "",
         };
       }),
-    [offerableLeads, overrides],
+    [displayLeads, overrides],
   );
 
   const stats = useMemo(() => {
@@ -189,6 +192,7 @@ export default function OfferDeskPage() {
         <h1 className="mt-2 text-3xl font-semibold text-zinc-50">Offer Desk</h1>
         <p className="mt-2 text-sm text-zinc-400">Track live offer posture, sent ranges, expirations, and counter states across your best acquisition opportunities.</p>
         <p className="mt-3 text-xs text-zinc-500">Desk inputs are cached locally until offer economics are persisted in the CRM.</p>
+        {showingDemoContent ? <p className="mt-3 text-xs text-sky-300">Showing built-in demo opportunities because no live offer candidates are available yet.</p> : null}
       </header>
 
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -308,13 +312,22 @@ export default function OfferDeskPage() {
                       </td>
                       <td className="py-3">
                         <div className="flex flex-col gap-2">
-                          <Link
-                            href={`/leads/${row.lead.id}`}
-                            className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-center text-sm text-zinc-200 transition hover:border-zinc-500 hover:bg-zinc-900"
-                          >
-                            Open Lead
-                          </Link>
-                          {row.lead.phone ? (
+                          {showingDemoContent ? (
+                            <Link
+                              href="/scrape"
+                              className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-center text-sm text-zinc-200 transition hover:border-zinc-500 hover:bg-zinc-900"
+                            >
+                              Open Scrape
+                            </Link>
+                          ) : (
+                            <Link
+                              href={`/leads/${row.lead.id}`}
+                              className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-center text-sm text-zinc-200 transition hover:border-zinc-500 hover:bg-zinc-900"
+                            >
+                              Open Lead
+                            </Link>
+                          )}
+                          {row.lead.phone && !showingDemoContent ? (
                             <a
                               href={`tel:${row.lead.phone}`}
                               className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-center text-sm text-zinc-200 transition hover:border-zinc-500 hover:bg-zinc-900"
